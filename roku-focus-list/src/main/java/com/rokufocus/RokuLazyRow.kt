@@ -1,0 +1,131 @@
+package com.rokufocus
+
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/**
+ * Standalone Roku-style fixed-focus horizontal list.
+ * The entire row is one focusable composable — D-pad LEFT/RIGHT scroll content,
+ * UP/DOWN pass through for vertical navigation between rows.
+ */
+@Composable
+fun RokuLazyRow(
+    state: RokuFocusListState,
+    modifier: Modifier = Modifier,
+    config: RokuFocusConfig = RokuFocusConfig(),
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    itemWidth: Dp,
+    itemSpacing: Dp = 12.dp,
+    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    onItemSelected: ((index: Int) -> Unit)? = null,
+    onItemClicked: ((index: Int) -> Unit)? = null,
+    onFocusEnter: (() -> Unit)? = null,
+    onFocusExit: (() -> Unit)? = null,
+    itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
+) {
+    if (state.itemCount == 0) return
+
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val hapticFeedback = LocalHapticFeedback.current
+    val configuration = LocalConfiguration.current
+
+    // Pixel values for highlight calculation
+    val startPaddingPx = with(density) { contentPadding.calculateLeftPadding(layoutDirection).toPx() }
+    val endPaddingPx = with(density) { contentPadding.calculateRightPadding(layoutDirection).toPx() }
+    val itemWidthPx = with(density) { itemWidth.toPx() }
+    val itemSpacingPx = with(density) { itemSpacing.toPx() }
+    val viewportWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+
+    // Auto-compute visible count from viewport dimensions
+    val startPaddingDp = contentPadding.calculateLeftPadding(layoutDirection)
+    val endPaddingDp = contentPadding.calculateRightPadding(layoutDirection)
+    val availableWidth = configuration.screenWidthDp.dp - startPaddingDp - endPaddingDp
+    state.visibleCount = ((availableWidth + itemSpacing) / (itemWidth + itemSpacing)).toInt()
+        .coerceAtLeast(1)
+
+    val focusRequester = remember { FocusRequester() }
+    var hasFocus by remember { mutableStateOf(false) }
+
+    // Highlight X position using shared utility (handles scroll clamping at edges)
+    val targetHighlightX = computeHighlightOffsetPx(
+        state, itemWidthPx, itemSpacingPx, startPaddingPx, endPaddingPx, viewportWidthPx
+    )
+    val animatedHighlightX by animateFloatAsState(
+        targetValue = targetHighlightX,
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "roku_row_highlight_x"
+    )
+
+    val onBoundaryHit: (() -> Unit)? = if (config.hapticFeedback) {
+        { hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) }
+    } else null
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .focusRequester(focusRequester)
+            .onFocusChanged { focusState ->
+                val newFocus = focusState.hasFocus || focusState.isFocused
+                if (newFocus != hasFocus) {
+                    if (newFocus) onFocusEnter?.invoke() else onFocusExit?.invoke()
+                    hasFocus = newFocus
+                }
+            }
+            .focusable()
+            .rokuKeyHandler(
+                state = state,
+                config = config,
+                orientation = Orientation.Horizontal,
+                onSelected = onItemSelected,
+                onClicked = onItemClicked,
+                onBoundaryHit = onBoundaryHit
+            )
+    ) {
+        RokuRowContent(
+            state = state,
+            contentPadding = contentPadding,
+            itemWidth = itemWidth,
+            itemSpacing = itemSpacing,
+            itemContent = itemContent
+        )
+
+        // Highlight overlay — positioned at the computed X offset
+        Box(modifier = Modifier.matchParentSize()) {
+            Box(
+                modifier = Modifier
+                    .graphicsLayer { translationX = animatedHighlightX }
+                    .width(itemWidth)
+                    .fillMaxHeight()
+            ) {
+                focusHighlight(hasFocus)
+            }
+        }
+    }
+}
