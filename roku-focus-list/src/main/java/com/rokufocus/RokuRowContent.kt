@@ -44,7 +44,10 @@ internal fun RokuRowContent(
         horizontalArrangement = Arrangement.spacedBy(itemSpacing),
         userScrollEnabled = false
     ) {
-        items(state.itemCount) { index ->
+        items(
+            count = state.itemCount,
+            key = { it }
+        ) { index ->
             Box(modifier = Modifier.width(itemWidth)) {
                 itemContent(index, index == state.selectedIndex)
             }

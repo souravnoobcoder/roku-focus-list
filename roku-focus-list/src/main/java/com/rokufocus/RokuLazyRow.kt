@@ -1,12 +1,11 @@
 package com.rokufocus
 
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,7 +21,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -54,40 +52,17 @@ fun RokuLazyRow(
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val hapticFeedback = LocalHapticFeedback.current
-    val configuration = LocalConfiguration.current
-
-    // Pixel values for highlight calculation
-    val startPaddingPx = with(density) { contentPadding.calculateLeftPadding(layoutDirection).toPx() }
-    val endPaddingPx = with(density) { contentPadding.calculateRightPadding(layoutDirection).toPx() }
-    val itemWidthPx = with(density) { itemWidth.toPx() }
-    val itemSpacingPx = with(density) { itemSpacing.toPx() }
-    val viewportWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-
-    // Auto-compute visible count from viewport dimensions
-    val startPaddingDp = contentPadding.calculateLeftPadding(layoutDirection)
-    val endPaddingDp = contentPadding.calculateRightPadding(layoutDirection)
-    val availableWidth = configuration.screenWidthDp.dp - startPaddingDp - endPaddingDp
-    state.visibleCount = ((availableWidth + itemSpacing) / (itemWidth + itemSpacing)).toInt()
-        .coerceAtLeast(1)
 
     val focusRequester = remember { FocusRequester() }
     var hasFocus by remember { mutableStateOf(false) }
-
-    // Highlight X position using shared utility (handles scroll clamping at edges)
-    val targetHighlightX = computeHighlightOffsetPx(
-        state, itemWidthPx, itemSpacingPx, startPaddingPx, endPaddingPx, viewportWidthPx
-    )
-    val animatedHighlightX by animateFloatAsState(
-        targetValue = targetHighlightX,
-        animationSpec = tween(300, easing = FastOutSlowInEasing),
-        label = "roku_row_highlight_x"
-    )
 
     val onBoundaryHit: (() -> Unit)? = if (config.hapticFeedback) {
         { hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) }
     } else null
 
-    Box(
+    // BoxWithConstraints gives us the actual viewport width (not full screen),
+    // critical when sidebars, insets, or split-screen reduce available space.
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .focusRequester(focusRequester)
@@ -108,6 +83,30 @@ fun RokuLazyRow(
                 onBoundaryHit = onBoundaryHit
             )
     ) {
+        // Pixel values for highlight calculation — using actual viewport width
+        val startPaddingPx = with(density) { contentPadding.calculateLeftPadding(layoutDirection).toPx() }
+        val endPaddingPx = with(density) { contentPadding.calculateRightPadding(layoutDirection).toPx() }
+        val itemWidthPx = with(density) { itemWidth.toPx() }
+        val itemSpacingPx = with(density) { itemSpacing.toPx() }
+        val viewportWidthPx = with(density) { maxWidth.toPx() }
+
+        // Auto-compute visible count from actual viewport dimensions
+        val startPaddingDp = contentPadding.calculateLeftPadding(layoutDirection)
+        val endPaddingDp = contentPadding.calculateRightPadding(layoutDirection)
+        val availableWidth = maxWidth - startPaddingDp - endPaddingDp
+        state.visibleCount = ((availableWidth + itemSpacing) / (itemWidth + itemSpacing)).toInt()
+            .coerceAtLeast(1)
+
+        // Highlight X position using shared utility (handles scroll clamping at edges)
+        val targetHighlightX = computeHighlightOffsetPx(
+            state, itemWidthPx, itemSpacingPx, startPaddingPx, endPaddingPx, viewportWidthPx
+        )
+        val animatedHighlightX by animateFloatAsState(
+            targetValue = targetHighlightX,
+            animationSpec = config.highlightAnimationSpec,
+            label = "roku_row_highlight_x"
+        )
+
         RokuRowContent(
             state = state,
             contentPadding = contentPadding,

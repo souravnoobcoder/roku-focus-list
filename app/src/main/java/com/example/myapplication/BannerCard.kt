@@ -48,7 +48,7 @@ fun BannerCard(
 
     Box(
         modifier = modifier
-            .size(width = 700.dp, height = 370.dp)
+            .size(width = 580.dp, height = 310.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale

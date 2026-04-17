@@ -1,7 +1,9 @@
 package com.rokufocus
 
+import android.os.SystemClock
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -22,61 +24,52 @@ fun Modifier.rokuKeyHandler(
     onBoundaryHit: (() -> Unit)? = null
 ): Modifier = composed {
     var lastKeyTime by remember { mutableLongStateOf(0L) }
+    var consecutivePresses by remember { mutableIntStateOf(0) }
 
     onPreviewKeyEvent { keyEvent ->
         if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
         val isHorizontal = orientation == Orientation.Horizontal
-        val forwardKeys = if (isHorizontal) {
-            setOf(Key.DirectionRight)
-        } else {
-            setOf(Key.DirectionDown)
-        }
-        val backwardKeys = if (isHorizontal) {
-            setOf(Key.DirectionLeft)
-        } else {
-            setOf(Key.DirectionUp)
-        }
+        val isForward = if (isHorizontal) keyEvent.key == Key.DirectionRight
+            else keyEvent.key == Key.DirectionDown
+        val isBackward = if (isHorizontal) keyEvent.key == Key.DirectionLeft
+            else keyEvent.key == Key.DirectionUp
 
         when {
-            keyEvent.key in forwardKeys -> {
-                val now = System.currentTimeMillis()
-                if (now - lastKeyTime < config.keyRepeatDelayMs) return@onPreviewKeyEvent true
+            isForward || isBackward -> {
+                val now = SystemClock.uptimeMillis()
+                if (now - lastKeyTime > 300) consecutivePresses = 0
 
-                val moved = if (config.wrapAround && !state.canScrollForward) {
-                    state.scrollTo(0)
-                    true
+                val effectiveDelay = if (config.keyRepeatAccelAfter > 0 &&
+                    consecutivePresses >= config.keyRepeatAccelAfter
+                ) config.keyRepeatFastDelayMs else config.keyRepeatDelayMs
+
+                if (now - lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
+
+                val moved = if (isForward) {
+                    if (config.wrapAround && !state.canScrollForward) {
+                        state.scrollTo(0)
+                        true
+                    } else {
+                        state.moveNext()
+                    }
                 } else {
-                    state.moveNext()
+                    if (config.wrapAround && !state.canScrollBackward) {
+                        state.scrollTo(state.itemCount - 1)
+                        true
+                    } else {
+                        state.movePrevious()
+                    }
                 }
 
                 if (moved) {
                     lastKeyTime = now
+                    consecutivePresses++
                     onSelected?.invoke(state.selectedIndex)
                 } else {
                     onBoundaryHit?.invoke()
                 }
-                true // always consume navigation-axis events
-            }
-
-            keyEvent.key in backwardKeys -> {
-                val now = System.currentTimeMillis()
-                if (now - lastKeyTime < config.keyRepeatDelayMs) return@onPreviewKeyEvent true
-
-                val moved = if (config.wrapAround && !state.canScrollBackward) {
-                    state.scrollTo(state.itemCount - 1)
-                    true
-                } else {
-                    state.movePrevious()
-                }
-
-                if (moved) {
-                    lastKeyTime = now
-                    onSelected?.invoke(state.selectedIndex)
-                } else {
-                    onBoundaryHit?.invoke()
-                }
-                true // always consume navigation-axis events
+                true
             }
 
             keyEvent.key == Key.Enter ||
