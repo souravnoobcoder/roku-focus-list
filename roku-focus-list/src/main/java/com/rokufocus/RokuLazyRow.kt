@@ -1,5 +1,6 @@
 package com.rokufocus
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
@@ -27,16 +28,12 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/**
- * Standalone Roku-style fixed-focus horizontal list.
- * The entire row is one focusable composable — D-pad LEFT/RIGHT scroll content,
- * UP/DOWN pass through for vertical navigation between rows.
- */
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
-fun RokuLazyRow(
+internal fun RokuLazyRowImpl(
     state: RokuFocusListState,
     modifier: Modifier = Modifier,
-    config: RokuFocusConfig = RokuFocusConfig(),
+    config: RokuFocusConfig = DefaultRokuFocusConfig,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     itemWidth: Dp,
     itemSpacing: Dp = 12.dp,
@@ -94,8 +91,10 @@ fun RokuLazyRow(
         val startPaddingDp = contentPadding.calculateLeftPadding(layoutDirection)
         val endPaddingDp = contentPadding.calculateRightPadding(layoutDirection)
         val availableWidth = maxWidth - startPaddingDp - endPaddingDp
-        state.visibleCount = ((availableWidth + itemSpacing) / (itemWidth + itemSpacing)).toInt()
-            .coerceAtLeast(1)
+        val denominator = itemWidth + itemSpacing
+        state.visibleCount = if (denominator > 0.dp) {
+            ((availableWidth + itemSpacing) / denominator).toInt().coerceAtLeast(1)
+        } else 1
 
         // Highlight X position using shared utility (handles scroll clamping at edges)
         val targetHighlightX = computeHighlightOffsetPx(

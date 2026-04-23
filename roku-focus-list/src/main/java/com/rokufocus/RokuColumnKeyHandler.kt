@@ -4,6 +4,7 @@ import android.os.SystemClock
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -23,7 +24,7 @@ internal class RokuColumnNavState(
 ) {
     var selectedRowIndex by mutableIntStateOf(initialRowIndex.coerceIn(0, maxOf(0, rowCount - 1)))
     var consecutivePresses by mutableIntStateOf(0)
-    var lastKeyTime: Long = 0L
+    var lastKeyTime by mutableLongStateOf(0L)
 }
 
 /**
@@ -55,7 +56,7 @@ internal fun Modifier.rokuColumnKeyHandler(
         Key.DirectionUp -> {
             if (now - navState.lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
             if (selectedRowIndex > 0) {
-                navState.selectedRowIndex--
+                navState.selectedRowIndex = (selectedRowIndex - 1).coerceAtLeast(0)
                 navState.lastKeyTime = now
                 navState.consecutivePresses++
                 onItemSelected?.invoke(navState.selectedRowIndex, rows[navState.selectedRowIndex].state.selectedIndex)
@@ -68,7 +69,7 @@ internal fun Modifier.rokuColumnKeyHandler(
         Key.DirectionDown -> {
             if (now - navState.lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
             if (selectedRowIndex < rows.size - 1) {
-                navState.selectedRowIndex++
+                navState.selectedRowIndex = (selectedRowIndex + 1).coerceAtMost(rows.size - 1)
                 navState.lastKeyTime = now
                 navState.consecutivePresses++
                 onItemSelected?.invoke(navState.selectedRowIndex, rows[navState.selectedRowIndex].state.selectedIndex)
@@ -81,7 +82,7 @@ internal fun Modifier.rokuColumnKeyHandler(
         // ── Horizontal: delegate to active row's state ──
         Key.DirectionRight -> {
             if (now - navState.lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
-            if (config.wrapAround && !activeState.canScrollForward) {
+            if (config.wrapAround && !activeState.canScrollForward && activeState.itemCount > 1) {
                 activeState.scrollTo(0)
                 navState.lastKeyTime = now
                 navState.consecutivePresses++
@@ -99,7 +100,7 @@ internal fun Modifier.rokuColumnKeyHandler(
 
         Key.DirectionLeft -> {
             if (now - navState.lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
-            if (config.wrapAround && !activeState.canScrollBackward) {
+            if (config.wrapAround && !activeState.canScrollBackward && activeState.itemCount > 1) {
                 activeState.scrollTo(activeState.itemCount - 1)
                 navState.lastKeyTime = now
                 navState.consecutivePresses++

@@ -1,5 +1,7 @@
 package com.rokufocus
 
+import android.annotation.SuppressLint
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -34,22 +36,25 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/**
- * OTT-style vertical + horizontal navigation component with a single animated focus highlight.
- *
- * This is a single focusable composable that manages both axes:
- * - D-pad UP/DOWN navigates between rows (vertical scroll, content slides under fixed focus)
- * - D-pad LEFT/RIGHT navigates within the focused row (horizontal scroll)
- * - Enter/Select triggers [onItemClicked]
- *
- * The focus highlight smoothly animates its position, width, and height when moving
- * between rows that have different item dimensions (e.g., landscape → portrait cards).
- */
+/** Cached per-frame size animation spec — avoids allocation on every recomposition. */
+private val HighlightSizeSpec: AnimationSpec<Float> = tween(durationMillis = 100, easing = FastOutSlowInEasing)
+
+/** Cached density conversions for the active row — avoids recomputing 6 toPx() calls per frame. */
+private data class ActiveRowGeometry(
+    val headerPx: Float,
+    val startPadPx: Float,
+    val endPadPx: Float,
+    val itemWidthPx: Float,
+    val itemSpacingPx: Float,
+    val itemHeightPx: Float
+)
+
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
-fun RokuLazyColumn(
+internal fun RokuLazyColumnImpl(
     rows: List<RokuColumnRowConfig>,
     modifier: Modifier = Modifier,
-    config: RokuFocusConfig = RokuFocusConfig(),
+    config: RokuFocusConfig = DefaultRokuFocusConfig,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     rowSpacing: Dp = 24.dp,
     initialRowIndex: Int = 0,
@@ -88,9 +93,10 @@ fun RokuLazyColumn(
                 val startPad = rowConfig.contentPadding.calculateLeftPadding(layoutDirection)
                 val endPad = rowConfig.contentPadding.calculateRightPadding(layoutDirection)
                 val avail = maxWidth - startPad - endPad
-                rowConfig.state.visibleCount =
-                    ((avail + rowConfig.itemSpacing) / (rowConfig.itemWidth + rowConfig.itemSpacing)).toInt()
-                        .coerceAtLeast(1)
+                val denom = rowConfig.itemWidth + rowConfig.itemSpacing
+                rowConfig.state.visibleCount = if (denom > 0.dp) {
+                    ((avail + rowConfig.itemSpacing) / denom).toInt().coerceAtLeast(1)
+                } else 1
             }
 
             val topPx = with(density) { contentPadding.calculateTopPadding().toPx() }
@@ -124,18 +130,24 @@ fun RokuLazyColumn(
             }
         }
 
-        // ── Highlight position ──
+        // ── Highlight position (density conversions cached per active row) ──
         val activeRow = rows[selectedRowIndex]
-        val activeHeaderPx = with(density) { activeRow.headerHeight.toPx() }
+        val (activeHeaderPx, activeStartPadPx, activeEndPadPx, activeItemWidthPx, activeItemSpacingPx, activeItemHeightPx) = remember(
+            selectedRowIndex, density, layoutDirection
+        ) {
+            val ar = rows[selectedRowIndex]
+            ActiveRowGeometry(
+                headerPx = with(density) { ar.headerHeight.toPx() },
+                startPadPx = with(density) { ar.contentPadding.calculateLeftPadding(layoutDirection).toPx() },
+                endPadPx = with(density) { ar.contentPadding.calculateRightPadding(layoutDirection).toPx() },
+                itemWidthPx = with(density) { ar.itemWidth.toPx() },
+                itemSpacingPx = with(density) { ar.itemSpacing.toPx() },
+                itemHeightPx = with(density) { ar.itemHeight.toPx() }
+            )
+        }
         val targetHighlightY = topPaddingPx + verticalScrollOverflowPx + activeHeaderPx
 
         val activeState = activeRow.state
-        val activeStartPadPx = with(density) { activeRow.contentPadding.calculateLeftPadding(layoutDirection).toPx() }
-        val activeEndPadPx = with(density) { activeRow.contentPadding.calculateRightPadding(layoutDirection).toPx() }
-        val activeItemWidthPx = with(density) { activeRow.itemWidth.toPx() }
-        val activeItemSpacingPx = with(density) { activeRow.itemSpacing.toPx() }
-        val activeItemHeightPx = with(density) { activeRow.itemHeight.toPx() }
-
         val targetHighlightX = computeHighlightOffsetPx(
             activeState, activeItemWidthPx, activeItemSpacingPx,
             activeStartPadPx, activeEndPadPx, viewportWidthPx
@@ -143,7 +155,7 @@ fun RokuLazyColumn(
 
         // ── Animate highlight: full spec for position, fast tween for size ──
         val spec = config.highlightAnimationSpec
-        val sizeSpec = tween<Float>(durationMillis = 100, easing = FastOutSlowInEasing)
+        val sizeSpec = HighlightSizeSpec
 
         val animatedX by animateFloatAsState(targetHighlightX, spec, label = "hl_x")
         val animatedY by animateFloatAsState(targetHighlightY, spec, label = "hl_y")

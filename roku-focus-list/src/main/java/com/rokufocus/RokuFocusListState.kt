@@ -33,7 +33,7 @@ class RokuFocusListState(
         }
 
     val highlightSlot: Int
-        get() = selectedIndex - windowStart
+        get() = (selectedIndex - windowStart).coerceIn(0, maxOf(0, visibleCount - 1))
 
     val canScrollForward: Boolean
         get() = selectedIndex < itemCount - 1
@@ -64,6 +64,8 @@ class RokuFocusListState(
         } else {
             selectedIndex = selectedIndex.coerceIn(0, newCount - 1)
         }
+        // Ensure focusSlot is still valid for the new count
+        // (windowStart/highlightSlot math depends on this)
     }
 }
 

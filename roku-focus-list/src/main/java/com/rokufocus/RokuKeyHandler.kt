@@ -47,14 +47,14 @@ fun Modifier.rokuKeyHandler(
                 if (now - lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
 
                 val moved = if (isForward) {
-                    if (config.wrapAround && !state.canScrollForward) {
+                    if (config.wrapAround && !state.canScrollForward && state.itemCount > 1) {
                         state.scrollTo(0)
                         true
                     } else {
                         state.moveNext()
                     }
                 } else {
-                    if (config.wrapAround && !state.canScrollBackward) {
+                    if (config.wrapAround && !state.canScrollBackward && state.itemCount > 1) {
                         state.scrollTo(state.itemCount - 1)
                         true
                     } else {

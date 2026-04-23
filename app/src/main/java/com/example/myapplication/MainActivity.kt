@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,11 +48,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.ui.theme.MyApplicationTheme
-import com.rokufocus.RokuColumnRowConfig
 import com.rokufocus.RokuFocusConfig
 import com.rokufocus.RokuLazyColumn
 import com.rokufocus.RokuLazyRow
 import com.rokufocus.rememberRokuFocusListState
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,16 +65,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { ROKU, PLAIN }
+// ─────────────────────────────────────────────────────────────────────────────
+// Screens & Data
+// ─────────────────────────────────────────────────────────────────────────────
 
-private enum class CardType {
-    BANNER,      // 700×370dp hero banner
-    WIDE,        // 300×170dp cinematic
-    LANDSCAPE,   // 220×140dp standard
-    CONTINUE,    // 220×140dp with progress bar
-    PORTRAIT,    // 150×220dp tall poster
-    MINI,        // 100×120dp compact
+private enum class Screen(val label: String, val icon: String) {
+    COLUMN("Column", "C"),
+    ROW("Row", "R"),
+    STATE("State", "S"),
+    WRAP("Wrap", "W"),
+    PLAIN("Plain", "P"),
 }
+
+private enum class CardType { BANNER, WIDE, LANDSCAPE, CONTINUE, PORTRAIT, MINI }
 
 private data class RowDef(
     val title: String,
@@ -102,123 +107,266 @@ private val allRows: List<RowDef> = List(ROW_COUNT) { i ->
     base.copy(title = "${i + 1}. ${base.title}")
 }
 
+@Composable
+private fun CardForType(cardType: CardType, movie: MovieItem, isFocused: Boolean) {
+    when (cardType) {
+        CardType.BANNER    -> BannerCard(movie = movie, isFocused = isFocused)
+        CardType.WIDE      -> WideCard(movie = movie, isFocused = isFocused)
+        CardType.LANDSCAPE -> MovieCard(movie = movie, isFocused = isFocused)
+        CardType.CONTINUE  -> ContinueWatchingCard(movie = movie, isFocused = isFocused)
+        CardType.PORTRAIT  -> PortraitCard(movie = movie, isFocused = isFocused)
+        CardType.MINI      -> MiniCard(movie = movie, isFocused = isFocused)
+    }
+}
+
+/** Request focus after a short delay to ensure the target is in the tree. */
+@Composable
+private fun RequestFocusOnAppear(focusRequester: FocusRequester) {
+    LaunchedEffect(Unit) {
+        delay(100) // wait for measurement + layout frames
+        try { focusRequester.requestFocus() } catch (_: Exception) { }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Main screen — switches between Roku library and plain Compose lists
+// Main screen
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 fun StreamFocusDemoScreen() {
-    var activeScreen by remember { mutableStateOf(Screen.ROKU) }
-    val rokuFocusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(Unit) { rokuFocusRequester.requestFocus() }
+    var activeScreen by remember { mutableStateOf(Screen.COLUMN) }
 
     Row(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0E0E0E))
     ) {
-        Sidebar(
-            activeScreen = activeScreen,
-            onScreenSelect = { activeScreen = it }
-        )
+        Sidebar(activeScreen = activeScreen, onScreenSelect = { activeScreen = it })
 
+        // Each screen manages its own focus internally
         when (activeScreen) {
-            Screen.ROKU -> RokuContent(rokuFocusRequester)
-            Screen.PLAIN -> PlainContent()
+            Screen.COLUMN -> ColumnDslContent()
+            Screen.ROW    -> RowDslContent()
+            Screen.STATE  -> RowStateContent()
+            Screen.WRAP   -> WrapAroundContent()
+            Screen.PLAIN  -> PlainContent()
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Roku library content — fixed-focus navigation
+// 1. COLUMN DSL — full OTT layout, 100 rows, 6 card types
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun RokuContent(focusRequester: FocusRequester) {
-    val rowStates = allRows.map { row ->
-        rememberRokuFocusListState(itemCount = row.items.size, focusSlot = 0)
-    }
-    val rowConfigs = allRows.mapIndexed { i, row ->
-        RokuColumnRowConfig(
-            state = rowStates[i],
-            itemWidth = row.itemWidth,
-            itemHeight = row.itemHeight,
-            itemSpacing = row.itemSpacing,
-            contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
-            headerHeight = 30.dp
-        )
-    }
+private fun ColumnDslContent() {
+    val focusRequester = remember { FocusRequester() }
+    RequestFocusOnAppear(focusRequester)
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = "RokuFocus Library",
-            color = Color.White,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 24.dp, top = 24.dp)
-        )
-        Text(
-            text = "$ROW_COUNT rows \u00b7 6 card types \u00b7 fixed-focus navigation",
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = 13.sp,
-            modifier = Modifier.padding(start = 24.dp, bottom = 16.dp)
-        )
-
+    ScreenShell(title = "RokuLazyColumn DSL", subtitle = "$ROW_COUNT rows \u00b7 6 card types \u00b7 fixed-focus") {
         RokuLazyColumn(
-            rows = rowConfigs,
-            modifier = Modifier
-                .fillMaxSize()
-                .focusRequester(focusRequester),
-            config = RokuFocusConfig(wrapAround = false),
+            modifier = Modifier.fillMaxSize().focusRequester(focusRequester),
             contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
             rowSpacing = 8.dp,
-            rowHeader = { rowIndex, isRowFocused ->
-                Text(
-                    text = allRows[rowIndex].title,
-                    color = if (isRowFocused) Color.White else Color.White.copy(alpha = 0.6f),
-                    fontSize = 18.sp,
-                    lineHeight = 22.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)
-                )
-            }
-        ) { rowIndex, itemIndex, isFocused ->
-            val movie = allRows[rowIndex].items[itemIndex]
-            when (allRows[rowIndex].cardType) {
-                CardType.BANNER    -> BannerCard(movie = movie, isFocused = isFocused)
-                CardType.WIDE      -> WideCard(movie = movie, isFocused = isFocused)
-                CardType.LANDSCAPE -> MovieCard(movie = movie, isFocused = isFocused)
-                CardType.CONTINUE  -> ContinueWatchingCard(movie = movie, isFocused = isFocused)
-                CardType.PORTRAIT  -> PortraitCard(movie = movie, isFocused = isFocused)
-                CardType.MINI      -> MiniCard(movie = movie, isFocused = isFocused)
+        ) {
+            allRows.forEach { rowDef ->
+                row(
+                    itemWidth = rowDef.itemWidth,
+                    itemHeight = rowDef.itemHeight,
+                    itemSpacing = rowDef.itemSpacing,
+                    contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+                    headerHeight = 30.dp,
+                    header = { isRowFocused -> RowHeaderText(rowDef.title, isRowFocused) }
+                ) {
+                    items(rowDef.items) { movie, isFocused ->
+                        CardForType(rowDef.cardType, movie, isFocused)
+                    }
+                }
             }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Plain Compose content — standard LazyColumn + LazyRow for comparison
-// Each card is individually focusable (default Android TV pattern).
+// 2. ROW DSL — standalone RokuLazyRows, auto-measured width
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RowDslContent() {
+    val focusRequester = remember { FocusRequester() }
+    RequestFocusOnAppear(focusRequester)
+
+    ScreenShell(title = "RokuLazyRow DSL", subtitle = "Auto-measured width \u00b7 no itemWidth needed") {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // Landscape cards — first row gets focus
+            Text("Trending (220\u00d7140)", color = Color.White, fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 24.dp))
+            RokuLazyRow(
+                modifier = Modifier.focusRequester(focusRequester),
+                itemSpacing = 14.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
+            ) {
+                items(SampleData.trending) { movie, isFocused ->
+                    MovieCard(movie = movie, isFocused = isFocused)
+                }
+            }
+
+            // Wide cards
+            Text("Featured (300\u00d7170)", color = Color.White, fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 24.dp))
+            RokuLazyRow(
+                itemSpacing = 16.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
+            ) {
+                items(SampleData.featured) { movie, isFocused ->
+                    WideCard(movie = movie, isFocused = isFocused)
+                }
+            }
+
+            // Portrait cards
+            Text("New Releases (150\u00d7220)", color = Color.White, fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 24.dp))
+            RokuLazyRow(
+                itemSpacing = 14.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
+            ) {
+                items(SampleData.newReleases) { movie, isFocused ->
+                    PortraitCard(movie = movie, isFocused = isFocused)
+                }
+            }
+
+            // Mini cards
+            Text("Quick Picks (100\u00d7120)", color = Color.White, fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 24.dp))
+            RokuLazyRow(
+                itemSpacing = 12.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
+            ) {
+                items(SampleData.quickPicks) { movie, isFocused ->
+                    MiniCard(movie = movie, isFocused = isFocused)
+                }
+            }
+
+            Spacer(Modifier.height(48.dp))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. STATE — RokuLazyRow with external state (programmatic control demo)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RowStateContent() {
+    val focusRequester = remember { FocusRequester() }
+    RequestFocusOnAppear(focusRequester)
+
+    ScreenShell(title = "RokuLazyRow + State", subtitle = "External state \u00b7 explicit itemWidth \u00b7 programmatic control") {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // Row starting at index 5
+            val state1 = rememberRokuFocusListState(
+                itemCount = SampleData.trending.size, initialIndex = 5
+            )
+            Text("Trending (starts at item 6)", color = Color.White, fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 24.dp))
+            RokuLazyRow(
+                state = state1,
+                itemWidth = 220.dp,
+                modifier = Modifier.focusRequester(focusRequester),
+                itemSpacing = 14.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
+            ) { index, isFocused ->
+                MovieCard(movie = SampleData.trending[index], isFocused = isFocused)
+            }
+
+            // Row with focusSlot = 2
+            val state2 = rememberRokuFocusListState(
+                itemCount = SampleData.featured.size, focusSlot = 2
+            )
+            Text("Featured (focusSlot = 2)", color = Color.White, fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 24.dp))
+            RokuLazyRow(
+                state = state2,
+                itemWidth = 300.dp,
+                itemSpacing = 16.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
+            ) { index, isFocused ->
+                WideCard(movie = SampleData.featured[index], isFocused = isFocused)
+            }
+
+            // Row with acceleration disabled
+            val state3 = rememberRokuFocusListState(itemCount = SampleData.action.size)
+            Text("Action (no acceleration)", color = Color.White, fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 24.dp))
+            RokuLazyRow(
+                state = state3,
+                itemWidth = 220.dp,
+                itemSpacing = 14.dp,
+                config = RokuFocusConfig(keyRepeatAccelAfter = 0),
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
+            ) { index, isFocused ->
+                MovieCard(movie = SampleData.action[index], isFocused = isFocused)
+            }
+
+            Spacer(Modifier.height(48.dp))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. WRAP — RokuLazyColumn with wrapAround enabled
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun WrapAroundContent() {
+    val focusRequester = remember { FocusRequester() }
+    RequestFocusOnAppear(focusRequester)
+
+    val wrapRows = baseRows.take(5)
+    ScreenShell(title = "Wrap-Around Mode", subtitle = "${wrapRows.size} rows \u00b7 horizontal + vertical wrap") {
+        RokuLazyColumn(
+            modifier = Modifier.fillMaxSize().focusRequester(focusRequester),
+            config = RokuFocusConfig(wrapAround = true),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
+            rowSpacing = 16.dp,
+        ) {
+            wrapRows.forEachIndexed { i, rowDef ->
+                row(
+                    itemWidth = rowDef.itemWidth,
+                    itemHeight = rowDef.itemHeight,
+                    itemSpacing = rowDef.itemSpacing,
+                    contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+                    headerHeight = 30.dp,
+                    header = { isRowFocused ->
+                        RowHeaderText("${i + 1}. ${rowDef.title} (wrap)", isRowFocused)
+                    }
+                ) {
+                    items(rowDef.items) { movie, isFocused ->
+                        CardForType(rowDef.cardType, movie, isFocused)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. PLAIN — Standard LazyColumn + LazyRow for comparison
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun PlainContent() {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = "Plain Compose",
-            color = Color.White,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 24.dp, top = 24.dp)
-        )
-        Text(
-            text = "$ROW_COUNT rows \u00b7 standard LazyColumn + LazyRow",
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = 13.sp,
-            modifier = Modifier.padding(start = 24.dp, bottom = 16.dp)
-        )
-
+    ScreenShell(title = "Plain Compose", subtitle = "$ROW_COUNT rows \u00b7 standard LazyColumn + LazyRow") {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
@@ -247,14 +395,7 @@ private fun PlainContent() {
                                     .onFocusChanged { focused = it.isFocused }
                                     .focusable()
                             ) {
-                                when (row.cardType) {
-                                    CardType.BANNER    -> BannerCard(movie = movie, isFocused = focused)
-                                    CardType.WIDE      -> WideCard(movie = movie, isFocused = focused)
-                                    CardType.LANDSCAPE -> MovieCard(movie = movie, isFocused = focused)
-                                    CardType.CONTINUE  -> ContinueWatchingCard(movie = movie, isFocused = focused)
-                                    CardType.PORTRAIT  -> PortraitCard(movie = movie, isFocused = focused)
-                                    CardType.MINI      -> MiniCard(movie = movie, isFocused = focused)
-                                }
+                                CardForType(row.cardType, movie, focused)
                             }
                         }
                     }
@@ -265,22 +406,34 @@ private fun PlainContent() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sidebar — screen switcher (Roku / Plain) + decorative nav items
+// Shared UI
 // ─────────────────────────────────────────────────────────────────────────────
 
-private data class NavItem(val label: String, val icon: String)
-
-private val decorativeNavItems = listOf(
-    NavItem("Search",   "\u2315"),   // ⌕
-    NavItem("Library",  "\u2630"),   // ☰
-    NavItem("Settings", "\u2699"),   // ⚙
-)
+@Composable
+private fun ScreenShell(title: String, subtitle: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(text = title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 24.dp, top = 24.dp))
+        Text(text = subtitle, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp,
+            modifier = Modifier.padding(start = 24.dp, bottom = 16.dp))
+        content()
+    }
+}
 
 @Composable
-private fun Sidebar(
-    activeScreen: Screen,
-    onScreenSelect: (Screen) -> Unit
-) {
+private fun RowHeaderText(title: String, isRowFocused: Boolean) {
+    Text(text = title,
+        color = if (isRowFocused) Color.White else Color.White.copy(alpha = 0.6f),
+        fontSize = 18.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 24.dp, bottom = 8.dp))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sidebar
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun Sidebar(activeScreen: Screen, onScreenSelect: (Screen) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxHeight()
@@ -291,112 +444,54 @@ private fun Sidebar(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Spacer(modifier = Modifier.height(8.dp))
-
-        // Screen switcher
-        SidebarItem(
-            item = NavItem("Roku", "R"),
-            isActive = activeScreen == Screen.ROKU,
-            onClick = { onScreenSelect(Screen.ROKU) }
-        )
-        SidebarItem(
-            item = NavItem("Plain", "P"),
-            isActive = activeScreen == Screen.PLAIN,
-            onClick = { onScreenSelect(Screen.PLAIN) }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Decorative nav items
-        decorativeNavItems.forEach { item ->
-            SidebarItem(item = item)
+        Screen.entries.forEach { screen ->
+            SidebarItem(
+                label = screen.label,
+                icon = screen.icon,
+                isActive = activeScreen == screen,
+                onClick = { onScreenSelect(screen) }
+            )
         }
     }
 }
 
 @Composable
 private fun SidebarItem(
-    item: NavItem,
+    label: String,
+    icon: String,
     isActive: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
     var focused by remember { mutableStateOf(false) }
     val interactionSource = remember { MutableInteractionSource() }
-
     val bgTarget = when {
-        focused -> Color.White
-        isActive -> Color.White.copy(alpha = 0.25f)
-        else -> Color.Transparent
+        focused -> Color.White; isActive -> Color.White.copy(alpha = 0.25f); else -> Color.Transparent
     }
     val bg by animateColorAsState(bgTarget, tween(180), label = "sidebar_bg")
-
     val fgTarget = when {
-        focused -> Color.Black
-        isActive -> Color.White.copy(alpha = 0.9f)
-        else -> Color.White.copy(alpha = 0.55f)
+        focused -> Color.Black; isActive -> Color.White.copy(alpha = 0.9f); else -> Color.White.copy(alpha = 0.55f)
     }
     val fg by animateColorAsState(fgTarget, tween(180), label = "sidebar_fg")
-
-    val scale by animateFloatAsState(
-        targetValue = if (focused) 1.05f else 1f,
-        animationSpec = tween(180),
-        label = "sidebar_scale"
-    )
+    val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(180), label = "sidebar_scale")
 
     Box(
         modifier = Modifier
             .size(width = 56.dp, height = 56.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(14.dp))
             .background(bg)
             .onFocusChanged { focused = it.isFocused }
             .then(
-                if (onClick != null) {
-                    Modifier.clickable(
-                        interactionSource = interactionSource,
-                        indication = null
-                    ) { onClick() }
-                } else {
-                    Modifier.focusable()
-                }
+                if (onClick != null) Modifier.clickable(interactionSource, null) { onClick() }
+                else Modifier.focusable()
             ),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Text(
-                text = item.icon,
-                color = fg,
-                fontSize = 20.sp
-            )
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxSize()) {
+            Text(text = icon, color = fg, fontSize = 20.sp)
             Spacer(Modifier.height(2.dp))
-            Text(
-                text = item.label,
-                color = fg,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Text(text = label, color = fg, fontSize = 9.sp, fontWeight = FontWeight.Medium)
         }
-    }
-}
-
-@Composable
-fun StandaloneRowExample() {
-    val state = rememberRokuFocusListState(
-        itemCount = SampleData.trending.size,
-        focusSlot = 0
-    )
-    RokuLazyRow(
-        state = state,
-        itemWidth = 220.dp,
-        itemSpacing = 14.dp,
-        contentPadding = PaddingValues(start = 48.dp, end = 48.dp)
-    ) { index, isFocused ->
-        MovieCard(movie = SampleData.trending[index], isFocused = isFocused)
     }
 }

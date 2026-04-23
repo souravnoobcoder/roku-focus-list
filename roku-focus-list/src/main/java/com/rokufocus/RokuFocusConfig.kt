@@ -4,6 +4,8 @@ import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 
+val DefaultRokuFocusConfig = RokuFocusConfig()
+
 data class RokuFocusConfig(
     val highlightAnimationSpec: AnimationSpec<Float> = tween(
         durationMillis = 200,

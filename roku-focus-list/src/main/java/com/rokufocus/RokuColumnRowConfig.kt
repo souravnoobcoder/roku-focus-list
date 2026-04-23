@@ -1,6 +1,7 @@
 package com.rokufocus
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.Stable
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -11,6 +12,7 @@ import androidx.compose.ui.unit.dp
  *   Must match the actual rendered header height for correct highlight Y positioning.
  *   Set to 0.dp if no header is used.
  */
+@Stable
 data class RokuColumnRowConfig(
     val state: RokuFocusListState,
     val itemWidth: Dp,
