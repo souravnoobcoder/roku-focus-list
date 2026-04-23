@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.rokufocus.demo
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -28,33 +28,32 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 
-/** Cinematic wide banner card — 300×170dp, rounded 16dp */
 @Composable
-fun WideCard(
+fun PortraitCard(
     movie: MovieItem,
     isFocused: Boolean,
     modifier: Modifier = Modifier
 ) {
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.04f else 1.0f,
+        targetValue = if (isFocused) 1.05f else 1.0f,
         animationSpec = tween(250),
-        label = "wide_scale"
+        label = "portrait_scale"
     )
     val cardAlpha by animateFloatAsState(
         targetValue = if (isFocused) 1.0f else 0.7f,
         animationSpec = tween(250),
-        label = "wide_alpha"
+        label = "portrait_alpha"
     )
 
     Box(
         modifier = modifier
-            .size(width = 300.dp, height = 170.dp)
+            .size(width = 150.dp, height = 220.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
                 alpha = cardAlpha
             }
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(12.dp))
     ) {
         AsyncImage(
             model = movie.imageUrl,
@@ -63,11 +62,11 @@ fun WideCard(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Tall gradient scrim
+        // Gradient scrim — taller for portrait layout
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(90.dp)
+                .height(100.dp)
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
@@ -79,32 +78,38 @@ fun WideCard(
         Text(
             text = movie.title,
             color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 14.dp, bottom = 26.dp)
+                .padding(start = 10.dp, end = 10.dp, bottom = 24.dp)
         )
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 14.dp, bottom = 10.dp)
+                .padding(start = 10.dp, bottom = 8.dp)
         ) {
-            Text(text = movie.year, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text(
+                text = movie.year,
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 10.sp
+            )
+
             Box(
-                Modifier
-                    .padding(horizontal = 5.dp)
+                modifier = Modifier
+                    .padding(horizontal = 4.dp)
                     .size(3.dp)
                     .background(Color.White.copy(alpha = 0.5f), CircleShape)
             )
+
             Text(
                 text = movie.rating,
                 color = Color(0xFFFFC107),
-                fontSize = 12.sp,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Medium
             )
         }

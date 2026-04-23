@@ -1,15 +1,18 @@
-package com.example.myapplication
+package com.rokufocus.demo
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -23,37 +26,35 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Text
 import coil3.compose.AsyncImage
 
+/** Cinematic wide banner card — 300×170dp, rounded 16dp */
 @Composable
-fun ContinueWatchingCard(
+fun WideCard(
     movie: MovieItem,
     isFocused: Boolean,
     modifier: Modifier = Modifier
 ) {
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1.0f,
+        targetValue = if (isFocused) 1.04f else 1.0f,
         animationSpec = tween(250),
-        label = "scale"
+        label = "wide_scale"
     )
     val cardAlpha by animateFloatAsState(
         targetValue = if (isFocused) 1.0f else 0.7f,
         animationSpec = tween(250),
-        label = "alpha"
+        label = "wide_alpha"
     )
-
-    val progressFraction = movie.rating.removeSuffix("%").toFloatOrNull()?.div(100f) ?: 0f
 
     Box(
         modifier = modifier
-            .size(width = 220.dp, height = 140.dp)
+            .size(width = 300.dp, height = 170.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
                 alpha = cardAlpha
             }
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(16.dp))
     ) {
         AsyncImage(
             model = movie.imageUrl,
@@ -62,14 +63,15 @@ fun ContinueWatchingCard(
             modifier = Modifier.fillMaxSize()
         )
 
+        // Tall gradient scrim
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(70.dp)
+                .height(90.dp)
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
                     )
                 )
         )
@@ -77,37 +79,33 @@ fun ContinueWatchingCard(
         Text(
             text = movie.title,
             color = Color.White,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 10.dp, bottom = 18.dp)
+                .padding(start = 14.dp, bottom = 26.dp)
         )
 
-        Text(
-            text = movie.year,
-            color = Color.White.copy(alpha = 0.7f),
-            fontSize = 11.sp,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 10.dp, bottom = 5.dp)
-        )
-
-        // Progress bar
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(3.dp)
-                .align(Alignment.BottomCenter)
-                .background(Color.White.copy(alpha = 0.3f))
+                .padding(start = 14.dp, bottom = 10.dp)
         ) {
+            Text(text = movie.year, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
             Box(
-                modifier = Modifier
-                    .fillMaxWidth(fraction = progressFraction)
-                    .height(3.dp)
-                    .background(Color(0xFFE50914))
+                Modifier
+                    .padding(horizontal = 5.dp)
+                    .size(3.dp)
+                    .background(Color.White.copy(alpha = 0.5f), CircleShape)
+            )
+            Text(
+                text = movie.rating,
+                color = Color(0xFFFFC107),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
             )
         }
     }

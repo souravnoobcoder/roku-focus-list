@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Lightweight focus highlight: a single rounded stroke that sits slightly outside
- * the card bounds. Always visible — no fade in/out on focus changes.
+ * the card bounds. Hidden when the parent list loses focus.
  */
 @Composable
 fun BoxScope.DefaultFocusHighlight(
@@ -32,7 +32,9 @@ fun BoxScope.DefaultFocusHighlight(
     overflow: Dp = 6.dp,
     animateScale: Boolean = false
 ) {
-    val targetScale = if (animateScale && isFocused) 1.02f else 1f
+    if (!isFocused) return
+
+    val targetScale = if (animateScale) 1.02f else 1f
     val scale by animateFloatAsState(
         targetValue = targetScale,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = 800f),

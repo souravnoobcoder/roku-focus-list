@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.rokufocus.demo
 
 object SampleData {
 

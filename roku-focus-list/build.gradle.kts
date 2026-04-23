@@ -1,7 +1,11 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
+    id("maven-publish")
 }
+
+group = "com.github.souravnoobcoder"
+version = "1.0.0"
 
 android {
     namespace = "com.rokufocus"
@@ -11,6 +15,7 @@ android {
 
     defaultConfig {
         minSdk = 24
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     compileOptions {
@@ -21,12 +26,31 @@ android {
     buildFeatures {
         compose = true
     }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
 }
 
 dependencies {
-    implementation(platform(libs.androidx.compose.bom))
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.animation:animation")
-    implementation("androidx.compose.runtime:runtime")
+    api(platform(libs.androidx.compose.bom))
+    api("androidx.compose.foundation:foundation")
+    api("androidx.compose.ui:ui")
+    api("androidx.compose.animation:animation")
+    api("androidx.compose.runtime:runtime")
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                groupId = "com.github.souravnoobcoder"
+                artifactId = "roku-focus-list"
+                version = "1.0.0"
+            }
+        }
+    }
 }

@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.rokufocus.demo
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -9,13 +9,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -26,24 +27,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 
+/** Compact square thumbnail — 100×100dp image + title below */
 @Composable
-fun RoundCard(
+fun MiniCard(
     movie: MovieItem,
     isFocused: Boolean,
     modifier: Modifier = Modifier
 ) {
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.08f else 1.0f,
-        animationSpec = tween(250),
-        label = "round_scale"
+        targetValue = if (isFocused) 1.1f else 1.0f,
+        animationSpec = tween(200),
+        label = "mini_scale"
     )
     val cardAlpha by animateFloatAsState(
-        targetValue = if (isFocused) 1.0f else 0.65f,
-        animationSpec = tween(250),
-        label = "round_alpha"
+        targetValue = if (isFocused) 1.0f else 0.6f,
+        animationSpec = tween(200),
+        label = "mini_alpha"
     )
-
-    val progressFraction = movie.rating.removeSuffix("%").toFloatOrNull()?.div(100f) ?: 0f
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -55,8 +55,8 @@ fun RoundCard(
     ) {
         Box(
             modifier = Modifier
-                .size(130.dp)
-                .clip(CircleShape)
+                .size(100.dp)
+                .clip(RoundedCornerShape(8.dp))
         ) {
             AsyncImage(
                 model = movie.imageUrl,
@@ -65,27 +65,25 @@ fun RoundCard(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Progress arc overlay at bottom
+            // Subtle bottom gradient
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .size(130.dp, 4.dp)
-                    .background(Color.White.copy(alpha = 0.3f))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size((130 * progressFraction).dp, 4.dp)
-                        .background(Color(0xFFE50914))
-                )
-            }
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.4f)),
+                            startY = 50f
+                        )
+                    )
+            )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Text(
             text = movie.title,
             color = Color.White,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

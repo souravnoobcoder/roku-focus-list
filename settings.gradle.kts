@@ -19,7 +19,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "My Application"
+rootProject.name = "RokuFocus"
 include(":app")
 include(":roku-focus-list")
  

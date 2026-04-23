@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.rokufocus.demo
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween

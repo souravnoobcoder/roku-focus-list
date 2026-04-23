@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.rokufocus.demo
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -47,7 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.myapplication.ui.theme.MyApplicationTheme
+import com.rokufocus.demo.ui.theme.RokuFocusTheme
 import com.rokufocus.RokuFocusConfig
 import com.rokufocus.RokuLazyColumn
 import com.rokufocus.RokuLazyRow
@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MyApplicationTheme(darkTheme = true, dynamicColor = false) {
+            RokuFocusTheme(darkTheme = true, dynamicColor = false) {
                 StreamFocusDemoScreen()
             }
         }
@@ -94,7 +94,7 @@ private val baseRows = listOf(
     RowDef("Trending Now",         SampleData.trending,         CardType.LANDSCAPE, 220.dp, 140.dp, 14.dp),
     RowDef("Continue Watching",    SampleData.continueWatching, CardType.LANDSCAPE, 220.dp, 140.dp, 14.dp),
     RowDef("New Releases",         SampleData.newReleases,      CardType.PORTRAIT,  150.dp, 220.dp, 14.dp),
-    RowDef("Quick Picks",          SampleData.quickPicks,       CardType.MINI,      100.dp, 120.dp, 12.dp),
+
     RowDef("Action & Adventure",   SampleData.action,           CardType.LANDSCAPE, 220.dp, 140.dp, 14.dp),
     RowDef("Critically Acclaimed", SampleData.acclaimed,        CardType.WIDE,      300.dp, 170.dp, 16.dp),
     RowDef("Drama",                SampleData.drama,            CardType.PORTRAIT,  150.dp, 220.dp, 14.dp),
@@ -237,18 +237,6 @@ private fun RowDslContent() {
             ) {
                 items(SampleData.newReleases) { movie, isFocused ->
                     PortraitCard(movie = movie, isFocused = isFocused)
-                }
-            }
-
-            // Mini cards
-            Text("Quick Picks (100\u00d7120)", color = Color.White, fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 24.dp))
-            RokuLazyRow(
-                itemSpacing = 12.dp,
-                contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
-            ) {
-                items(SampleData.quickPicks) { movie, isFocused ->
-                    MiniCard(movie = movie, isFocused = isFocused)
                 }
             }
 

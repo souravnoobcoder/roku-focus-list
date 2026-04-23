@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.rokufocus.demo
 
 import android.app.Application
 import coil3.ImageLoader

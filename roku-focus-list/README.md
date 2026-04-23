@@ -1,106 +1,155 @@
 # roku-focus-list
 
-A Jetpack Compose library that provides Roku-style fixed-focus horizontal list navigation for Android TV and Fire TV. The focus highlight stays at a fixed screen position while the entire list content slides behind it — the Roku TV navigation model.
+[![](https://jitpack.io/v/souravnoobcoder/roku-focus-list.svg)](https://jitpack.io/#souravnoobcoder/roku-focus-list)
 
-![Demo](demo.gif)
+A Jetpack Compose library that provides Roku-style fixed-focus navigation for Android TV and Fire TV. The focus highlight stays at a fixed screen position while content scrolls behind it — both horizontally (within rows) and vertically (between rows).
 
 ## Installation
 
-Add the library to your project:
+### JitPack
+
+Add JitPack to your project-level `settings.gradle.kts`:
 
 ```kotlin
-// settings.gradle.kts
-include(":roku-focus-list")
-
-// app/build.gradle.kts
-dependencies {
-    implementation(project(":roku-focus-list"))
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
 }
 ```
 
-For published artifacts (coming soon):
+Add the dependency to your app-level `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.rokufocus:roku-focus-list:1.0.0")
+    implementation("com.github.souravnoobcoder:roku-focus-list:1.0.0")
 }
 ```
 
-## Basic Usage
+## Quick Start
+
+### Simple Row (DSL — auto-measured width)
 
 ```kotlin
 @Composable
 fun MyTvRow() {
+    RokuLazyRow(
+        itemSpacing = 14.dp,
+        contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+        onItemClicked = { index -> /* handle click */ }
+    ) {
+        items(movies) { movie, isFocused ->
+            MovieCard(movie = movie, isFocused = isFocused)
+        }
+    }
+}
+```
+
+### Row with External State
+
+```kotlin
+@Composable
+fun MyControlledRow() {
     val state = rememberRokuFocusListState(
-        itemCount = 20,
-        visibleCount = 5,
-        focusSlot = 0  // focus anchored to leftmost slot
+        itemCount = movies.size,
+        initialIndex = 0,
+        focusSlot = 0
     )
 
     RokuLazyRow(
         state = state,
         itemWidth = 220.dp,
-        itemSpacing = 16.dp,
-        contentPadding = PaddingValues(horizontal = 48.dp),
-        onItemClicked = { index -> /* handle click */ }
+        itemSpacing = 14.dp,
+        contentPadding = PaddingValues(start = 24.dp, end = 48.dp)
     ) { index, isFocused ->
-        // Your card composable
-        MyCard(title = "Item $index", isFocused = isFocused)
+        MovieCard(movie = movies[index], isFocused = isFocused)
+    }
+}
+```
+
+### Full OTT Layout (Column + Rows)
+
+```kotlin
+@Composable
+fun MyHomeScreen() {
+    RokuLazyColumn(
+        contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
+        rowSpacing = 8.dp,
+    ) {
+        row(
+            itemWidth = 580.dp, itemHeight = 310.dp, itemSpacing = 20.dp,
+            contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+            headerHeight = 30.dp,
+            header = { isRowFocused -> Text("Hero", color = Color.White) }
+        ) {
+            items(heroMovies) { movie, isFocused ->
+                BannerCard(movie = movie, isFocused = isFocused)
+            }
+        }
+        row(
+            itemWidth = 220.dp, itemHeight = 140.dp, itemSpacing = 14.dp,
+            contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+            headerHeight = 30.dp,
+            header = { isRowFocused -> Text("Trending", color = Color.White) }
+        ) {
+            items(trendingMovies) { movie, isFocused ->
+                MovieCard(movie = movie, isFocused = isFocused)
+            }
+        }
     }
 }
 ```
 
 ## Configuration
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `animationSpec` | `AnimationSpec<Float>` | `tween(300ms)` | Animation for content sliding |
-| `highlightAnimationSpec` | `AnimationSpec<Float>` | `tween(300ms)` | Animation for highlight movement at edges |
-| `keyRepeatDelayMs` | `Long` | `150L` | Throttle delay for held D-pad keys (ms) |
-| `wrapAround` | `Boolean` | `false` | Wrap from last item to first and vice versa |
-| `hapticFeedback` | `Boolean` | `true` | Vibrate on boundary hit |
-
 ```kotlin
 val config = RokuFocusConfig(
-    animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
-    keyRepeatDelayMs = 100L,
-    wrapAround = true,
-    hapticFeedback = false
-)
-
-RokuLazyRow(
-    state = state,
-    config = config,
-    itemWidth = 200.dp,
-    ...
+    highlightAnimationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+    keyRepeatDelayMs = 150L,
+    keyRepeatAccelAfter = 3,
+    keyRepeatFastDelayMs = 50L,
+    wrapAround = false,
+    hapticFeedback = true,
+    allowFocusEscape = true
 )
 ```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `highlightAnimationSpec` | `AnimationSpec<Float>` | `tween(200ms)` | Animation for highlight and content sliding |
+| `keyRepeatDelayMs` | `Long` | `150L` | Throttle delay for held D-pad keys (ms) |
+| `keyRepeatAccelAfter` | `Int` | `3` | After N consecutive presses, switch to fast delay. 0 = disabled |
+| `keyRepeatFastDelayMs` | `Long` | `50L` | Faster repeat delay after acceleration kicks in |
+| `wrapAround` | `Boolean` | `false` | Wrap from last item to first and vice versa |
+| `hapticFeedback` | `Boolean` | `true` | Vibrate on boundary hit |
+| `allowFocusEscape` | `Boolean` | `true` | Let D-pad at edges pass focus to adjacent composables |
 
 ## Custom Focus Highlight
 
-Replace the default white border with your own. The `focusHighlight` lambda has `BoxScope` receiver so `matchParentSize()` is available:
+Replace the default white border with your own:
 
 ```kotlin
 RokuLazyRow(
-    state = state,
-    itemWidth = 220.dp,
+    itemSpacing = 14.dp,
     focusHighlight = { isFocused ->
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .border(
-                    width = 4.dp,
-                    color = if (isFocused) Color.Blue else Color.Transparent,
-                    shape = RoundedCornerShape(16.dp)
-                )
-        )
+        if (isFocused) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .border(4.dp, Color.Blue, RoundedCornerShape(16.dp))
+            )
+        }
     }
-) { index, isFocused ->
-    MyCard(index, isFocused)
+) {
+    items(movies) { movie, isFocused ->
+        MovieCard(movie, isFocused)
+    }
 }
 ```
 
-Or use the default with custom colors:
+Or use the default with custom parameters:
 
 ```kotlin
 focusHighlight = { isFocused ->
@@ -109,7 +158,8 @@ focusHighlight = { isFocused ->
         borderColor = Color.Cyan,
         borderWidth = 4.dp,
         cornerRadius = 16.dp,
-        glowAlpha = 0.4f
+        overflow = 8.dp,
+        animateScale = true
     )
 }
 ```
@@ -119,36 +169,21 @@ focusHighlight = { isFocused ->
 The `focusSlot` parameter controls where the fixed focus highlight sits:
 
 - `focusSlot = 0` — leftmost visible item (default)
-- `focusSlot = 2` — third slot from left (Roku-style center-ish)
-- `focusSlot = visibleCount / 2` — true center
+- `focusSlot = 2` — third slot from left
 
 At list edges, the highlight position adjusts automatically so no empty space is shown.
-
-## Multiple Rows (TV Home Screen)
-
-Stack rows in a `Column`. D-pad UP/DOWN naturally moves focus between rows:
-
-```kotlin
-Column {
-    ContentRow(title = "Trending", itemCount = 15, focusSlot = 0)
-    ContentRow(title = "Continue Watching", itemCount = 10, focusSlot = 2)
-    ContentRow(title = "Recommended", itemCount = 20, focusSlot = 0)
-}
-```
-
-Each row remembers its own selection position independently.
 
 ## API Reference
 
 ### `RokuFocusListState`
 
-State holder for the focus list.
+State holder for focus list navigation.
 
 | Property / Method | Type | Description |
 |---|---|---|
 | `selectedIndex` | `Int` | Currently selected item index (read-only) |
 | `itemCount` | `Int` | Total number of items (read-only) |
-| `visibleCount` | `Int` | Items visible on screen |
+| `visibleCount` | `Int` | Items visible on screen (auto-computed) |
 | `focusSlot` | `Int` | Fixed focus slot position (0-indexed) |
 | `windowStart` | `Int` | Index of first visible item |
 | `highlightSlot` | `Int` | Visible position of highlight (= selectedIndex - windowStart) |
@@ -166,21 +201,39 @@ State holder for the focus list.
 fun rememberRokuFocusListState(
     itemCount: Int,
     initialIndex: Int = 0,
-    visibleCount: Int = 5,
     focusSlot: Int = 0
 ): RokuFocusListState
 ```
 
-### `RokuLazyRow`
+### `RokuLazyRow` (DSL)
+
+```kotlin
+@Composable
+fun RokuLazyRow(
+    modifier: Modifier = Modifier,
+    config: RokuFocusConfig = DefaultRokuFocusConfig,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    itemSpacing: Dp = 12.dp,
+    focusSlot: Int = 0,
+    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    onItemSelected: ((index: Int) -> Unit)? = null,
+    onItemClicked: ((index: Int) -> Unit)? = null,
+    onFocusEnter: (() -> Unit)? = null,
+    onFocusExit: (() -> Unit)? = null,
+    content: RokuItemScope.() -> Unit
+)
+```
+
+### `RokuLazyRow` (State-based)
 
 ```kotlin
 @Composable
 fun RokuLazyRow(
     state: RokuFocusListState,
-    modifier: Modifier = Modifier,
-    config: RokuFocusConfig = RokuFocusConfig(),
-    contentPadding: PaddingValues = PaddingValues(0.dp),
     itemWidth: Dp,
+    modifier: Modifier = Modifier,
+    config: RokuFocusConfig = DefaultRokuFocusConfig,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
     itemSpacing: Dp = 12.dp,
     focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((index: Int) -> Unit)? = null,
@@ -191,21 +244,43 @@ fun RokuLazyRow(
 )
 ```
 
-### `RokuFocusConfig`
+### `RokuLazyColumn` (DSL)
 
 ```kotlin
-data class RokuFocusConfig(
-    val animationSpec: AnimationSpec<Float>,
-    val highlightAnimationSpec: AnimationSpec<Float>,
-    val keyRepeatDelayMs: Long,
-    val wrapAround: Boolean,
-    val hapticFeedback: Boolean
+@Composable
+fun RokuLazyColumn(
+    modifier: Modifier = Modifier,
+    config: RokuFocusConfig = DefaultRokuFocusConfig,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    rowSpacing: Dp = 24.dp,
+    initialRowIndex: Int = 0,
+    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    content: RokuLazyColumnScope.() -> Unit
+)
+```
+
+### `RokuLazyColumn` (State-based)
+
+```kotlin
+@Composable
+fun RokuLazyColumn(
+    rows: List<RokuColumnRowConfig>,
+    modifier: Modifier = Modifier,
+    config: RokuFocusConfig = DefaultRokuFocusConfig,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    rowSpacing: Dp = 24.dp,
+    initialRowIndex: Int = 0,
+    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null,
+    itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
 )
 ```
 
 ### `DefaultFocusHighlight`
-
-A `BoxScope` extension composable rendering a white rounded border with subtle glow:
 
 ```kotlin
 @Composable
@@ -213,11 +288,10 @@ fun BoxScope.DefaultFocusHighlight(
     isFocused: Boolean,
     modifier: Modifier = Modifier,
     borderColor: Color = Color.White,
-    unfocusedAlpha: Float = 0.0f,
-    focusedAlpha: Float = 1.0f,
     borderWidth: Dp = 3.dp,
     cornerRadius: Dp = 12.dp,
-    glowAlpha: Float = 0.3f
+    overflow: Dp = 6.dp,
+    animateScale: Boolean = false
 )
 ```
 
@@ -233,7 +307,7 @@ Pre-defined animation specs:
 
 ### `Modifier.rokuKeyHandler()`
 
-Reusable key event handler modifier:
+Reusable key event handler modifier for standalone rows:
 
 ```kotlin
 fun Modifier.rokuKeyHandler(
@@ -248,12 +322,18 @@ fun Modifier.rokuKeyHandler(
 
 ## How It Works
 
-1. The entire `RokuLazyRow` is a single focusable composable — individual items are NOT focusable
+1. The entire `RokuLazyRow` / `RokuLazyColumn` is a single focusable composable — individual items are NOT focusable
 2. D-pad LEFT/RIGHT events are intercepted at the container level
 3. `selectedIndex` is maintained internally (not via Compose focus system)
-4. Internally uses `LazyRow(userScrollEnabled = false)` with `LazyListState.animateScrollToItem()` for programmatic scrolling — Compose handles all item recycling and composition
-5. The focus highlight overlay uses `graphicsLayer { translationX }` (draw-phase only) and never moves during normal scrolling — only adjusts at list edges
-6. D-pad UP/DOWN events pass through for vertical navigation between rows
+4. Internally uses `LazyRow(userScrollEnabled = false)` with `animateScrollToItem()` for programmatic scrolling — Compose handles all item recycling and composition
+5. The focus highlight overlay uses `graphicsLayer { translationX/Y }` (draw-phase only) and never moves during normal scrolling — only adjusts at list edges
+6. D-pad UP/DOWN events pass through for vertical navigation between rows (standalone) or are handled by the column (in `RokuLazyColumn`)
+
+## Requirements
+
+- minSdk 24
+- Jetpack Compose (BOM 2024.09.00+)
+- No Material dependency required
 
 ## License
 
