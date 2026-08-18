@@ -9,7 +9,12 @@ plugins {
 }
 
 group = "com.github.souravnoobcoder"
-version = "2.0.0"
+
+// JitPack builds a tag and expects the artifact to land in ~/.m2 under that exact version, so it
+// passes the tag in VERSION. Without honouring it, tagging 2.0.1 would publish 2.0.0 and the
+// coordinate consumers ask for would resolve to nothing.
+version = (System.getenv("VERSION") ?: providers.gradleProperty("libraryVersion").get())
+    .removePrefix("v")
 
 kotlin {
     android {

@@ -663,6 +663,41 @@ The standalone consumer needs an Android SDK: set `ANDROID_HOME`, or create
 
 ---
 
+## Releasing
+
+Consumers resolve this library from JitPack, which builds a git tag the first time somebody asks
+for it. Releasing is therefore: bump the version, tag, and make sure JitPack's build of that tag
+actually works before anyone depends on it. The `Release` workflow does the last two.
+
+**1. Bump the version in a PR.** `libraryVersion` in `gradle.properties` is the single source of
+truth. Update it, add the matching `## [x.y.z]` section to [CHANGELOG.md](CHANGELOG.md), and merge.
+The workflow never pushes to `master`; it only creates a tag and a release.
+
+**2. Run the workflow** from the Actions tab, or:
+
+```bash
+gh workflow run release.yml -f version=2.0.1
+```
+
+It refuses to run unless the version is a bare semver string (`2.0.1`, not `v2.0.1` — matching the
+existing tags), matches `libraryVersion`, and is not already tagged. Then it builds every target on
+**JDK 17** (what `jitpack.yml` pins, so the toolchain JitPack will use is exercised first), runs the
+shared tests, publishes to the local Maven repo, and resolves that coordinate from the standalone
+`verification/published-consumer` build. Only then does it tag, cut a GitHub release from the
+changelog section, and request the artifact from JitPack so the build is warm and verified rather
+than discovered broken by the first consumer.
+
+Pass `-f dry_run=true` to run every check without tagging, or `-f prerelease=true` to mark the
+release as a pre-release.
+
+**Why the version is wired to the tag.** JitPack passes the tag it is building in a `VERSION`
+environment variable and then looks for exactly that version in `~/.m2/repository`. If the build
+published a hardcoded version instead, tagging `2.0.1` would publish `2.0.0` and the coordinate
+consumers write would resolve to nothing — the build log would look green. `roku-focus-list`'s
+`version` therefore reads `VERSION` when set and falls back to `libraryVersion` otherwise.
+
+---
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
