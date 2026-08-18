@@ -9,7 +9,7 @@ plugins {
     id("org.jetbrains.compose") version "1.10.3"
 }
 
-val rokuFocusList = "com.github.reshusingh07:roku-focus-list:1.0.0"
+val rokuFocusList = "com.github.souravnoobcoder:roku-focus-list:2.0.0"
 
 kotlin {
     android {

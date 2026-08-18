@@ -8,8 +8,8 @@ plugins {
     id("maven-publish")
 }
 
-group = "com.github.reshusingh07"
-version = "1.0.0"
+group = "com.github.souravnoobcoder"
+version = "2.0.0"
 
 kotlin {
     android {
@@ -50,6 +50,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.compose.mp.runtime)
+            api(libs.compose.mp.runtime.saveable)
             api(libs.compose.mp.foundation)
             api(libs.compose.mp.ui)
             api(libs.compose.mp.animation)
