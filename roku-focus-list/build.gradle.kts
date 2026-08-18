@@ -1,56 +1,62 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.kotlin.multiplatform.library)
+    alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.kotlin.compose)
     id("maven-publish")
 }
 
-group = "com.github.souravnoobcoder"
+group = "com.github.reshusingh07"
 version = "1.0.0"
 
-android {
-    namespace = "com.rokufocus"
-    compileSdk {
-        version = release(36)
-    }
-
-    defaultConfig {
+kotlin {
+    android {
+        namespace = "com.rokufocus"
+        compileSdk = 36
         minSdk = 24
-        consumerProguardFiles("consumer-rules.pro")
-    }
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
+        }
 
-    buildFeatures {
-        compose = true
-    }
+        optimization {
+            consumerKeepRules.apply {
+                publish = true
+                file("consumer-rules.pro")
+            }
+        }
 
-    publishing {
-        singleVariant("release") {
-            withSourcesJar()
+        // The Compose lint check misreads BoxWithConstraints scope usage in RokuLazyRow /
+        // RokuLazyColumn, and @SuppressLint is not available from commonMain.
+        lint {
+            disable += "UnusedBoxWithConstraintsScope"
         }
     }
-}
 
-dependencies {
-    api(platform(libs.androidx.compose.bom))
-    api("androidx.compose.foundation:foundation")
-    api("androidx.compose.ui:ui")
-    api("androidx.compose.animation:animation")
-    api("androidx.compose.runtime:runtime")
-}
+    jvm("desktop") {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
+        }
+    }
 
-afterEvaluate {
-    publishing {
-        publications {
-            create<MavenPublication>("release") {
-                from(components["release"])
-                groupId = "com.github.souravnoobcoder"
-                artifactId = "roku-focus-list"
-                version = "1.0.0"
-            }
+    iosX64()
+    iosArm64()
+    iosSimulatorArm64()
+
+    withSourcesJar(publish = true)
+
+    sourceSets {
+        commonMain.dependencies {
+            api(libs.compose.mp.runtime)
+            api(libs.compose.mp.foundation)
+            api(libs.compose.mp.ui)
+            api(libs.compose.mp.animation)
+        }
+
+        commonTest.dependencies {
+            implementation(kotlin("test"))
         }
     }
 }

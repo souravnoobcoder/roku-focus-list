@@ -328,7 +328,7 @@ private fun WrapAroundContent() {
             contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
             rowSpacing = 16.dp,
         ) {
-            wrapRows.forEachIndexed { i, rowDef ->
+               wrapRows.forEachIndexed { i, rowDef ->
                 row(
                     itemWidth = rowDef.itemWidth,
                     itemHeight = rowDef.itemHeight,
