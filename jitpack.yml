@@ -1,4 +1,9 @@
+# openjdk17 is JitPack's newest option and satisfies AGP 9 (min JDK 17). Local verification
+# was done on JDK 21; a JDK 17 build has not been exercised.
 jdk:
   - openjdk17
+# Kotlin Multiplatform publishes several modules under the same group: roku-focus-list (root
+# metadata), -android, -desktop, -iosarm64, -iossimulatorarm64, -iosx64. Consumers only ever
+# reference the root coordinate; Gradle metadata redirects to the rest.
 install:
   - ./gradlew :roku-focus-list:publishToMavenLocal
