@@ -1,10 +1,10 @@
 package com.rokufocus
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -29,7 +29,8 @@ import androidx.compose.ui.unit.dp
  * Roku-style fixed-focus horizontal list with **DSL item builder**.
  *
  * Item width is **auto-measured** from the first item — just like LazyRow,
- * items size themselves. State is managed internally.
+ * items size themselves. State is managed internally; use the state-based overload when you need
+ * to read or drive the selection from outside.
  *
  * ```
  * RokuLazyRow(
@@ -43,11 +44,14 @@ import androidx.compose.ui.unit.dp
  * ```
  *
  * @param modifier Modifier applied to the outer container.
- * @param config Navigation behavior (animation, key repeat, haptics, wrap-around).
+ * @param config Navigation behavior (animation, key repeat, haptics, wrap-around, focus escape).
  * @param contentPadding Padding around the row content.
  * @param itemSpacing Horizontal gap between items.
  * @param focusSlot Which visible slot the highlight sits at (0 = leftmost).
- * @param focusHighlight Composable that renders the focus border.
+ * @param initialIndex Item selected the first time the row's state is created. It is remembered as
+ *   a request, so an index that only becomes valid once items arrive is honored then rather than
+ *   clamped away.
+ * @param focusHighlight Renders the focus border. See [RokuHighlightScope].
  * @param onItemSelected Called when the selected item changes.
  * @param onItemClicked Called on Enter/DpadCenter press.
  * @param onFocusEnter Called when this row gains focus.
@@ -61,7 +65,8 @@ fun RokuLazyRow(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     itemSpacing: Dp = 12.dp,
     focusSlot: Int = 0,
-    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    initialIndex: Int = 0,
+    focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((index: Int) -> Unit)? = null,
     onItemClicked: ((index: Int) -> Unit)? = null,
     onFocusEnter: (() -> Unit)? = null,
@@ -69,10 +74,17 @@ fun RokuLazyRow(
     content: RokuItemScope.() -> Unit
 ) {
     val scope = RokuItemScope().apply(content)
-    if (scope.itemCount == 0) return
-    val state = rememberRokuFocusListState(itemCount = scope.itemCount, focusSlot = focusSlot)
+
+    // Remembered before the empty-list bail-out below: a row whose data momentarily empties must
+    // come back to the item it was on, not to a freshly created state.
+    val state = rememberRokuFocusListState(
+        itemCount = scope.itemCount,
+        initialIndex = initialIndex,
+        focusSlot = focusSlot
+    )
     val density = LocalDensity.current
-    val itemContent = scope.itemContent ?: return
+    val itemContent = scope.itemContent
+    if (scope.itemCount == 0 || itemContent == null) return
 
     // Auto-measure first item to determine width
     var measuredWidthPx by remember { mutableIntStateOf(0) }
@@ -102,6 +114,8 @@ fun RokuLazyRow(
             onItemClicked = onItemClicked,
             onFocusEnter = onFocusEnter,
             onFocusExit = onFocusExit,
+            itemKey = scope.itemKey,
+            itemContentDescription = scope.itemContentDescription,
             itemContent = itemContent
         )
     }
@@ -112,20 +126,23 @@ fun RokuLazyRow(
 /**
  * Roku-style fixed-focus horizontal list with **external state control**.
  *
- * Use when you need programmatic selection (`state.scrollTo(index)`)
- * or explicit item width.
+ * Use when you need programmatic selection (`state.scrollTo(index)`), focus control
+ * (`state.requestFocus()`), or explicit item width.
  *
  * @param state Row state created via [rememberRokuFocusListState].
  * @param itemWidth Fixed width of each item.
  * @param modifier Modifier applied to the outer container.
- * @param config Navigation behavior (animation, key repeat, haptics, wrap-around).
+ * @param config Navigation behavior (animation, key repeat, haptics, wrap-around, focus escape).
  * @param contentPadding Padding around the row content.
  * @param itemSpacing Horizontal gap between items.
- * @param focusHighlight Composable that renders the focus border.
+ * @param focusHighlight Renders the focus border. See [RokuHighlightScope].
  * @param onItemSelected Called when the selected item changes.
  * @param onItemClicked Called on Enter/DpadCenter press.
  * @param onFocusEnter Called when this row gains focus.
  * @param onFocusExit Called when this row loses focus.
+ * @param itemKey Stable key per item, following `LazyRow`'s `key` contract.
+ * @param itemContentDescription Describes an item to accessibility services. The selected item's
+ *   description is surfaced on the row, which is the node screen readers see.
  * @param itemContent Composable for each item. Receives `index` and `isFocused`.
  */
 @Composable
@@ -136,11 +153,13 @@ fun RokuLazyRow(
     config: RokuFocusConfig = DefaultRokuFocusConfig,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     itemSpacing: Dp = 12.dp,
-    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((index: Int) -> Unit)? = null,
     onItemClicked: ((index: Int) -> Unit)? = null,
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
+    itemKey: ((index: Int) -> Any)? = null,
+    itemContentDescription: ((index: Int) -> String?)? = null,
     itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
 ) {
     RokuLazyRowImpl(
@@ -155,6 +174,8 @@ fun RokuLazyRow(
         onItemClicked = onItemClicked,
         onFocusEnter = onFocusEnter,
         onFocusExit = onFocusExit,
+        itemKey = itemKey,
+        itemContentDescription = itemContentDescription,
         itemContent = itemContent
     )
 }
@@ -164,17 +185,23 @@ fun RokuLazyRow(
 /**
  * OTT-style vertical + horizontal navigation with **DSL row builder**.
  *
- * Each [row][RokuLazyColumnScope.row] declares its own card dimensions,
- * header, and items. State for each row is managed internally.
+ * Each [row][RokuLazyColumnScope.row] declares its own card dimensions, header, and items, and
+ * [customRow][RokuLazyColumnScope.customRow] drops in anything that is not a rail of equal cards.
+ * Per-row selection state is managed internally; the column's own selection is hoistable through
+ * [state].
  *
  * ```
  * RokuLazyColumn(rowSpacing = 8.dp) {
- *     row(itemWidth = 580.dp, itemHeight = 310.dp,
+ *     row(
+ *         key = "hero",
+ *         itemWidth = 580.dp, itemHeight = 310.dp,
  *         header = { Text("Hero") }
  *     ) {
  *         items(heroMovies) { movie, isFocused -> BannerCard(movie, isFocused) }
  *     }
- *     row(itemWidth = 220.dp, itemHeight = 140.dp,
+ *     row(
+ *         key = "trending",
+ *         itemWidth = 220.dp, itemHeight = 140.dp,
  *         header = { Text("Trending") }
  *     ) {
  *         items(trendingMovies) { movie, isFocused -> MovieCard(movie, isFocused) }
@@ -183,59 +210,94 @@ fun RokuLazyRow(
  * ```
  *
  * @param modifier Modifier applied to the outer container.
- * @param config Navigation behavior (animation, key repeat, acceleration, wrap-around).
+ * @param state Which row is selected. Hoist it to read or drive the selection, or to move platform
+ *   focus onto the column with [RokuColumnState.requestFocus].
+ * @param config Navigation behavior (animation, key repeat, acceleration, wrap-around, focus escape).
  * @param contentPadding Vertical padding around the column content.
  * @param rowSpacing Vertical gap between rows.
- * @param initialRowIndex Which row to focus on first.
- * @param focusHighlight Composable that renders the focus border.
+ * @param focusHighlight Renders the focus border. See [RokuHighlightScope].
  * @param onItemSelected Called when selection changes. Receives `(rowIndex, itemIndex)`.
  * @param onItemClicked Called on Enter/DpadCenter. Receives `(rowIndex, itemIndex)`.
- * @param content Row declarations via [RokuLazyColumnScope.row].
+ * @param onFocusEnter Called when the column gains focus.
+ * @param onFocusExit Called when the column loses focus.
+ * @param content Row declarations via [RokuLazyColumnScope.row] and
+ *   [RokuLazyColumnScope.customRow].
  */
 @Composable
 fun RokuLazyColumn(
     modifier: Modifier = Modifier,
+    state: RokuColumnState = rememberRokuColumnState(),
     config: RokuFocusConfig = DefaultRokuFocusConfig,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     rowSpacing: Dp = 24.dp,
-    initialRowIndex: Int = 0,
-    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
     onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    onFocusEnter: (() -> Unit)? = null,
+    onFocusExit: (() -> Unit)? = null,
     content: RokuLazyColumnScope.() -> Unit
 ) {
     val scope = RokuLazyColumnScope().apply(content)
 
-    val rowConfigs = scope.rows.mapIndexed { i, spec ->
-        val state = rememberRokuFocusListState(
-            itemCount = spec.itemCount,
-            focusSlot = spec.focusSlot
-        )
-        RokuColumnRowConfig(
-            state = state,
-            itemWidth = spec.itemWidth,
-            itemHeight = spec.itemHeight,
-            itemSpacing = spec.itemSpacing,
-            contentPadding = spec.contentPadding,
-            headerHeight = spec.headerHeight
-        )
+    // All-or-nothing, so a half-keyed column can never have a consumer key collide with the
+    // positional fallback of a neighbouring row.
+    val allKeyed = scope.rows.isNotEmpty() && scope.rows.all { it.key != null }
+
+    val resolvedRows = scope.rows.mapIndexed { index, spec ->
+        when (spec) {
+            is RokuLazyColumnScope.RowSpec.Items -> {
+                val rowState = key(if (allKeyed) spec.key!! else index) {
+                    rememberRokuFocusListState(
+                        itemCount = spec.itemCount,
+                        initialIndex = spec.initialIndex,
+                        focusSlot = spec.focusSlot
+                    )
+                }
+                RokuResolvedRow.Items(
+                    key = spec.key,
+                    header = spec.header,
+                    config = RokuColumnRowConfig(
+                        state = rowState,
+                        itemWidth = spec.itemWidth,
+                        itemHeight = spec.itemHeight,
+                        itemSpacing = spec.itemSpacing,
+                        contentPadding = spec.contentPadding,
+                        headerHeight = spec.headerHeight,
+                        key = spec.key,
+                        itemContentDescription = spec.itemContentDescription
+                    ),
+                    itemKey = spec.itemKey
+                )
+            }
+
+            is RokuLazyColumnScope.RowSpec.Custom -> RokuResolvedRow.Custom(
+                key = spec.key,
+                headerHeight = spec.headerHeight,
+                contentHeight = spec.height,
+                showHighlight = spec.showHighlight,
+                header = spec.header,
+                onKeyEvent = spec.onKeyEvent,
+                content = spec.content
+            )
+        }
     }
 
     RokuLazyColumnImpl(
-        rows = rowConfigs,
+        rows = resolvedRows,
+        state = state,
         modifier = modifier,
         config = config,
         contentPadding = contentPadding,
         rowSpacing = rowSpacing,
-        initialRowIndex = initialRowIndex,
         focusHighlight = focusHighlight,
         onItemSelected = onItemSelected,
         onItemClicked = onItemClicked,
-        rowHeader = { rowIndex, isRowFocused ->
-            scope.rows.getOrNull(rowIndex)?.header?.invoke(isRowFocused)
-        },
+        onFocusEnter = onFocusEnter,
+        onFocusExit = onFocusExit,
+        rowHeader = null,
         itemContent = { rowIndex, itemIndex, isFocused ->
-            scope.rows.getOrNull(rowIndex)?.itemContent?.invoke(itemIndex, isFocused)
+            val spec = scope.rows.getOrNull(rowIndex)
+            if (spec is RokuLazyColumnScope.RowSpec.Items) spec.itemContent(itemIndex, isFocused)
         }
     )
 }
@@ -245,17 +307,21 @@ fun RokuLazyColumn(
 /**
  * OTT-style vertical + horizontal navigation with **external state control**.
  *
- * Use when you need programmatic access to per-row selection.
+ * Use when you need programmatic access to per-row selection. Custom rows are a DSL feature; this
+ * overload renders card rails only.
  *
  * @param rows List of row configurations, each with its own [RokuFocusListState].
  * @param modifier Modifier applied to the outer container.
- * @param config Navigation behavior (animation, key repeat, acceleration, wrap-around).
+ * @param state Which row is selected. Hoist it to read or drive the selection, or to move platform
+ *   focus onto the column with [RokuColumnState.requestFocus].
+ * @param config Navigation behavior (animation, key repeat, acceleration, wrap-around, focus escape).
  * @param contentPadding Vertical padding around the column content.
  * @param rowSpacing Vertical gap between rows.
- * @param initialRowIndex Which row to focus on first.
- * @param focusHighlight Composable that renders the focus border.
+ * @param focusHighlight Renders the focus border. See [RokuHighlightScope].
  * @param onItemSelected Called when selection changes. Receives `(rowIndex, itemIndex)`.
  * @param onItemClicked Called on Enter/DpadCenter. Receives `(rowIndex, itemIndex)`.
+ * @param onFocusEnter Called when the column gains focus.
+ * @param onFocusExit Called when the column loses focus.
  * @param rowHeader Optional composable above each row. Height **must** match [RokuColumnRowConfig.headerHeight].
  * @param itemContent Composable for each item. Receives `(rowIndex, itemIndex, isFocused)`.
  */
@@ -263,26 +329,34 @@ fun RokuLazyColumn(
 fun RokuLazyColumn(
     rows: List<RokuColumnRowConfig>,
     modifier: Modifier = Modifier,
+    state: RokuColumnState = rememberRokuColumnState(),
     config: RokuFocusConfig = DefaultRokuFocusConfig,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     rowSpacing: Dp = 24.dp,
-    initialRowIndex: Int = 0,
-    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
     onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    onFocusEnter: (() -> Unit)? = null,
+    onFocusExit: (() -> Unit)? = null,
     rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null,
     itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
 ) {
+    val resolvedRows = rows.map { rowConfig ->
+        RokuResolvedRow.Items(key = rowConfig.key, header = null, config = rowConfig)
+    }
+
     RokuLazyColumnImpl(
-        rows = rows,
+        rows = resolvedRows,
+        state = state,
         modifier = modifier,
         config = config,
         contentPadding = contentPadding,
         rowSpacing = rowSpacing,
-        initialRowIndex = initialRowIndex,
         focusHighlight = focusHighlight,
         onItemSelected = onItemSelected,
         onItemClicked = onItemClicked,
+        onFocusEnter = onFocusEnter,
+        onFocusExit = onFocusExit,
         rowHeader = rowHeader,
         itemContent = itemContent
     )

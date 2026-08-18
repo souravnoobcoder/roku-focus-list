@@ -1,14 +1,39 @@
 package com.rokufocus
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
 import kotlin.math.max
 
+/**
+ * Selection state for a single fixed-focus row.
+ *
+ * The state is a plain object with a public constructor, so it can be hoisted into your own state
+ * holder and driven from outside composition. [rememberRokuFocusListState] is the convenience
+ * factory that also survives configuration changes and back-stack restoration.
+ *
+ * ### Requested vs selected index
+ *
+ * [selectedIndex] is derived: it is [requestedIndex] coerced into the current item range. Setting
+ * an index that is not valid *yet* is therefore remembered rather than lost — when items arrive
+ * later and the range grows, the selection lands where it was asked to. Every move (D-pad,
+ * [scrollTo], assigning [selectedIndex]) replaces the request, so ordinary navigation never snaps
+ * back to a stale target.
+ *
+ * @param itemCount Number of items currently in the row.
+ * @param initialIndex Index to select. May exceed [itemCount]; see above.
+ * @param visibleCount How many items fit in the viewport. Overwritten by the composable that
+ *   renders the row, which measures it.
+ * @property focusSlot Which visible slot the highlight sits at (0 = leading edge).
+ */
 @Stable
 class RokuFocusListState(
     itemCount: Int,
@@ -16,66 +41,141 @@ class RokuFocusListState(
     visibleCount: Int = 1,
     val focusSlot: Int = 0
 ) {
-    var selectedIndex by mutableIntStateOf(initialIndex.coerceIn(0, maxOf(0, itemCount - 1)))
-        private set
+    private var _requestedIndex by mutableIntStateOf(initialIndex.coerceAtLeast(0))
+    private var _itemCount by mutableIntStateOf(itemCount.coerceAtLeast(0))
 
-    var itemCount by mutableIntStateOf(itemCount)
-        private set
+    internal val keyRepeat = RokuKeyRepeatTracker()
+    internal val focusRequester = FocusRequester()
 
-    /** How many items fit in the viewport. Auto-computed by [RokuLazyRow]. */
+    /** The last index anyone asked for, before coercion. Re-applied whenever the row grows. */
+    val requestedIndex: Int get() = _requestedIndex
+
+    /** The item the highlight sits on. Always in range, or 0 while the row is empty. */
+    var selectedIndex: Int
+        get() = _requestedIndex.coerceIn(0, max(0, _itemCount - 1))
+        set(value) = scrollTo(value)
+
+    val itemCount: Int get() = _itemCount
+
+    /** How many items fit in the viewport. Auto-computed by [RokuLazyRow] / [RokuLazyColumn]. */
     var visibleCount by mutableIntStateOf(visibleCount)
+        internal set
+
+    /**
+     * True while this row renders as focused: it holds platform focus when used standalone, or it
+     * is the active row of a focused [RokuLazyColumn].
+     */
+    var hasFocus by mutableStateOf(false)
         internal set
 
     val windowStart: Int
         get() {
             val ideal = selectedIndex - focusSlot
-            return ideal.coerceIn(0, maxOf(0, itemCount - visibleCount))
+            return ideal.coerceIn(0, max(0, _itemCount - visibleCount))
         }
 
     val highlightSlot: Int
-        get() = (selectedIndex - windowStart).coerceIn(0, maxOf(0, visibleCount - 1))
+        get() = (selectedIndex - windowStart).coerceIn(0, max(0, visibleCount - 1))
 
     val canScrollForward: Boolean
-        get() = selectedIndex < itemCount - 1
+        get() = selectedIndex < _itemCount - 1
 
     val canScrollBackward: Boolean
         get() = selectedIndex > 0
 
     fun moveNext(): Boolean {
         if (!canScrollForward) return false
-        selectedIndex++
+        scrollTo(selectedIndex + 1)
         return true
     }
 
     fun movePrevious(): Boolean {
         if (!canScrollBackward) return false
-        selectedIndex--
+        scrollTo(selectedIndex - 1)
         return true
     }
 
+    /** Selects [index], remembering it as the request even when the row is currently shorter. */
     fun scrollTo(index: Int) {
-        selectedIndex = index.coerceIn(0, maxOf(0, itemCount - 1))
+        _requestedIndex = index.coerceAtLeast(0)
     }
 
+    /**
+     * Tells the state how many items the row now has. Selection is re-derived from
+     * [requestedIndex], so a target that was out of range before becomes reachable once the row
+     * grows to include it.
+     */
     fun updateItemCount(newCount: Int) {
-        itemCount = newCount
-        if (newCount == 0) {
-            selectedIndex = 0
-        } else {
-            selectedIndex = selectedIndex.coerceIn(0, newCount - 1)
-        }
-        // Ensure focusSlot is still valid for the new count
-        // (windowStart/highlightSlot math depends on this)
+        _itemCount = newCount.coerceAtLeast(0)
+    }
+
+    /**
+     * Moves platform focus onto a **standalone** [RokuLazyRow] driven by this state.
+     *
+     * It does nothing for a row inside a [RokuLazyColumn]: the column is deliberately the only
+     * focusable node there, so call [RokuColumnState.requestFocus] instead and set the row with
+     * [RokuColumnState.moveToRow].
+     *
+     * @return whether focus was taken. False when the row is not composed and laid out yet, or
+     *   when the focus target refused it.
+     */
+    fun requestFocus(): Boolean = focusRequester.requestFocus()
+
+    companion object {
+        /**
+         * Saves the requested index and the focus slot, mirroring how `LazyListState.Saver` stores
+         * its indices. Use it when hoisting a state into your own `rememberSaveable`.
+         *
+         * The item count is deliberately **not** saved: it describes the data, not the selection,
+         * and a count restored from a previous run can easily exceed what the data source has this
+         * time — which would hand out-of-range indices straight to your item lambda. A restored
+         * state therefore comes back empty and renders nothing until you call [updateItemCount]
+         * with the count you actually have. [rememberRokuFocusListState] does that for you.
+         */
+        val Saver: Saver<RokuFocusListState, *> = listSaver(
+            save = { listOf(it.requestedIndex, it.focusSlot) },
+            restore = {
+                RokuFocusListState(
+                    itemCount = 0,
+                    initialIndex = it[0],
+                    focusSlot = it[1]
+                )
+            }
+        )
     }
 }
 
+/**
+ * Creates a [RokuFocusListState] that survives configuration changes and back-stack restoration.
+ *
+ * @param itemCount Current number of items. Changes are pushed into the state, which re-derives
+ *   the selection from the last requested index.
+ * @param initialIndex Index to select the first time the state is created.
+ * @param focusSlot Which visible slot the highlight sits at. Changing it recreates the state.
+ */
 @Composable
 fun rememberRokuFocusListState(
     itemCount: Int,
     initialIndex: Int = 0,
     focusSlot: Int = 0
 ): RokuFocusListState {
-    val state = remember(focusSlot) {
+    // Pinning focusSlot into the saver keeps a restored state on the slot the caller asks for
+    // today: rememberSaveable compares `inputs` within a composition, but a value coming back
+    // across process death was saved before those inputs existed.
+    val saver = remember(focusSlot) {
+        listSaver<RokuFocusListState, Int>(
+            save = { listOf(it.requestedIndex) },
+            restore = {
+                RokuFocusListState(
+                    itemCount = 0,
+                    initialIndex = it[0],
+                    focusSlot = focusSlot
+                )
+            }
+        )
+    }
+
+    val state = rememberSaveable(focusSlot, saver = saver) {
         RokuFocusListState(
             itemCount = itemCount,
             initialIndex = initialIndex,
@@ -83,9 +183,9 @@ fun rememberRokuFocusListState(
         )
     }
 
-    LaunchedEffect(itemCount) {
-        state.updateItemCount(itemCount)
-    }
+    // Applied during composition rather than from an effect, so a restored or newly grown row is
+    // never rendered against a stale count for one frame.
+    state.updateItemCount(itemCount)
 
     return state
 }
@@ -117,3 +217,4 @@ internal fun computeHighlightOffsetPx(
     val scrollOverflowPx = (desiredScrollPx - maxScrollPx).coerceAtLeast(0f)
     return startPaddingPx + scrollOverflowPx + state.highlightSlot * stepPx
 }
+

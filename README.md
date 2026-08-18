@@ -1,17 +1,18 @@
 # RokuFocus
 
-[![JitPack](https://jitpack.io/v/reshusingh07/roku-focus-list.svg)](https://jitpack.io/#reshusingh07/roku-focus-list)
+[![JitPack](https://jitpack.io/v/souravnoobcoder/roku-focus-list.svg)](https://jitpack.io/#souravnoobcoder/roku-focus-list)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.21-blue.svg)](https://kotlinlang.org)
 [![Compose Multiplatform](https://img.shields.io/badge/Compose%20Multiplatform-1.10.3-blue.svg)](https://www.jetbrains.com/lp/compose-multiplatform/)
 [![API](https://img.shields.io/badge/API-24%2B-brightgreen.svg)](https://developer.android.com/about/versions/nougat)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 Roku-style fixed-focus D-pad navigation for **Android TV**, **Fire TV**, and any other Compose
 target — built as a **Kotlin Multiplatform / Compose Multiplatform** library.
 
 The focus highlight stays locked at a fixed screen position while content smoothly scrolls behind
 it — exactly how Roku TV navigation works. Supports horizontal rows, full OTT grid layouts
-(vertical + horizontal), wrap-around, key-repeat acceleration, and custom highlight rendering.
+(vertical + horizontal), heterogeneous rows, wrap-around, key-repeat acceleration, and custom
+highlight rendering.
 
 ## Why RokuFocus?
 
@@ -26,8 +27,11 @@ major streaming apps.
 | D-pad handling | Container-level, throttled | Per-item focusable |
 | Key-repeat acceleration | Built-in | Manual |
 | Wrap-around | One flag | Manual |
-| Highlight customization | Lambda with `BoxScope` | Per-item focus indication |
+| Focus escape | Per edge | Manual |
+| Highlight customization | One lambda, with row/item context | Per-item focus indication |
 | OTT grid layout | `RokuLazyColumn` with mixed row sizes | Manual `LazyColumn` + focus wiring |
+| Non-uniform rows | `customRow` escape hatch | Manual |
+| State restoration | `rememberSaveable`-backed | Manual |
 
 ---
 
@@ -82,7 +86,7 @@ dependencyResolutionManagement {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("com.github.reshusingh07:roku-focus-list:1.0.0")
+            implementation("com.github.souravnoobcoder:roku-focus-list:2.0.0")
         }
     }
 }
@@ -95,18 +99,20 @@ for `commonMain`, the AAR for Android, a jar for desktop, klibs for iOS.
 
 ```kotlin
 dependencies {
-    implementation("com.github.reshusingh07:roku-focus-list:1.0.0")
+    implementation("com.github.souravnoobcoder:roku-focus-list:2.0.0")
 }
 ```
 
 > The library has **no Material dependency** — it only pulls in Compose Foundation, UI, Animation,
-> and Runtime.
+> Runtime, and Runtime-Saveable.
+
+Upgrading from 1.x? See the [migration table](#migrating-from-1x-to-20).
 
 ---
 
 ## Quick Start
 
-The API is identical on every platform, and unchanged from the Android-only releases.
+The API is identical on every platform.
 
 ### 1. Single Row
 
@@ -141,45 +147,30 @@ fun TvHomeScreen() {
         contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
         rowSpacing = 8.dp,
     ) {
-        // Hero banner row
         row(
             itemWidth = 580.dp,
             itemHeight = 310.dp,
             itemSpacing = 20.dp,
             contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
             headerHeight = 30.dp,
+            key = "hero",
             header = { isRowFocused -> RowHeader("Hero", isRowFocused) }
         ) {
-            items(heroMovies) { movie, isFocused ->
+            items(heroMovies, key = { it.id }) { movie, isFocused ->
                 BannerCard(movie = movie, isFocused = isFocused)
             }
         }
 
-        // Standard movie row
         row(
             itemWidth = 220.dp,
             itemHeight = 140.dp,
-            itemSpacing = 14.dp,
             contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
             headerHeight = 30.dp,
+            key = "trending",
             header = { isRowFocused -> RowHeader("Trending Now", isRowFocused) }
         ) {
-            items(trendingMovies) { movie, isFocused ->
+            items(trendingMovies, key = { it.id }) { movie, isFocused ->
                 MovieCard(movie = movie, isFocused = isFocused)
-            }
-        }
-
-        // Portrait cards row
-        row(
-            itemWidth = 150.dp,
-            itemHeight = 220.dp,
-            itemSpacing = 14.dp,
-            contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
-            headerHeight = 30.dp,
-            header = { isRowFocused -> RowHeader("New Releases", isRowFocused) }
-        ) {
-            items(newReleases) { movie, isFocused ->
-                PortraitCard(movie = movie, isFocused = isFocused)
             }
         }
     }
@@ -191,7 +182,7 @@ the active row, and a single highlight overlay animates smoothly across rows of 
 
 ### 3. Row with External State
 
-When you need programmatic control (jump to an index, read current selection):
+When you need programmatic control (jump to an index, read the current selection, move focus in):
 
 ```kotlin
 @Composable
@@ -216,6 +207,242 @@ fun ControlledRow() {
     }
 }
 ```
+
+---
+
+## State, hoisting and restoration
+
+Both state objects follow the `LazyColumn` / `rememberLazyListState` pattern: a plain class with a
+public constructor, a `remember*` factory that defaults into the composable, and a `Saver`.
+
+```kotlin
+val columnState = rememberRokuColumnState()
+val rowState = rememberRokuFocusListState(itemCount = movies.size)
+
+RokuLazyColumn(state = columnState) { /* rows */ }
+```
+
+| API | What it does |
+|---|---|
+| `rememberRokuColumnState(initialRowIndex)` | Column selection, restored across config changes and back-stack restoration. |
+| `columnState.selectedRowIndex` | Read or assign the selected row. `moveToRow(index)` does the same thing. |
+| `columnState.requestedRowIndex` | The last row anyone asked for, before resolution. |
+| `columnState.rowCount` / `hasSelectableRow` | What the column currently renders. |
+| `columnState.hasFocus` | Observable — true while the column holds platform focus. |
+| `columnState.requestFocus()` | Move platform focus onto the column. Returns `false` if it is not laid out yet. |
+| `rowState.requestFocus()` | Same, for a **standalone** `RokuLazyRow`. Inside a column the column is the focus target — use `columnState.requestFocus()` and `moveToRow`. |
+| `rememberRokuFocusListState(itemCount, initialIndex, focusSlot)` | Per-row selection, also saveable. |
+| `rowState.selectedIndex` / `scrollTo(index)` | Read or set the selected item. |
+| `rowState.moveNext()` / `movePrevious()` | Step the selection. Returns `false` at an edge. |
+| `rowState.hasFocus` | True while the row renders as focused (standalone, or the active row of a focused column). |
+| `RokuColumnState.Saver`, `RokuFocusListState.Saver` | For hoisting into your own `rememberSaveable` or state holder. `RokuFocusListState.Saver` does not save the item count — call `updateItemCount` after restoring a hoisted row state. |
+
+### Selection survives navigation for free
+
+`rememberRokuColumnState()` is backed by `rememberSaveable`, so a destination that is torn down and
+re-created comes back on the same row — configuration changes, process death, and back-stack
+restoration all work with no extra wiring, as long as your navigation library provides a
+`SaveableStateHolder` (all of them do; `androidx.navigation` does it per destination).
+
+### Selecting a row that does not exist yet
+
+Rows usually stream in from the network. Assigning a selection *before* those rows arrive is the
+normal case, not an error, so both state objects remember the index you asked for and apply it once
+the range grows to include it:
+
+```kotlin
+val columnState = rememberRokuColumnState()
+
+LaunchedEffect(Unit) {
+    columnState.selectedRowIndex = 5   // only one placeholder row exists right now
+}
+// ... rows load ...
+// columnState.selectedRowIndex is 5 the moment row 5 exists.
+```
+
+Any D-pad move or explicit `moveToRow` replaces the pending request, so ordinary navigation never
+snaps back to a stale target. `RokuFocusListState` behaves the same way when `updateItemCount`
+grows a row.
+
+---
+
+## Row identity (`key`)
+
+`row(key = ...)` follows `LazyColumn`'s `key` contract. Supply one whenever rows can be inserted,
+removed, filtered or reordered:
+
+```kotlin
+row(itemWidth = 220.dp, itemHeight = 140.dp, key = "continue-watching") { /* items */ }
+```
+
+Without a key, each row's selection state is remembered by *position*, so inserting a row at the
+top silently shifts every row's selection down one. Keys must be unique within the column and
+savable (a `String`, `Int`, or another Bundle-friendly type).
+
+Keys are all-or-nothing: if any row omits one, the column falls back to positional identity for
+every row rather than mixing consumer keys with positional fallbacks.
+
+---
+
+## Focus escape, per edge
+
+`RokuFocusEscape` decides, for each edge, whether a press that cannot move the selection is left
+unconsumed — which is what lets platform focus travel to whatever is next to the list.
+
+```kotlin
+RokuFocusConfig(
+    // Left goes back to the navigation pane; the other three edges stay inside the list.
+    focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
+)
+```
+
+Presets: `RokuFocusEscape.All` (the default), `.None`, `.Horizontal`, `.Vertical`.
+
+`start` / `end` mean the beginning and end of a row's item order — LEFT and RIGHT in a
+left-to-right layout. The library does not currently mirror for RTL.
+
+---
+
+## Heterogeneous rows (`customRow`)
+
+Real OTT screens are not 100% uniform card rails. `customRow` drops anything into the column — a
+hero pager, a chip strip, a multi-line grid — while the column keeps owning vertical navigation:
+
+```kotlin
+RokuLazyColumn {
+    customRow(
+        height = 310.dp,
+        key = "hero",
+        onKeyEvent = { navKey ->
+            when (navKey) {
+                RokuNavKey.Left  -> if (page > 0) { page--; true } else false
+                RokuNavKey.Right -> if (page < last) { page++; true } else false
+                RokuNavKey.Enter -> { open(page); true }
+            }
+        }
+    ) { isRowFocused ->
+        HeroPager(page = page, isRowFocused = isRowFocused)
+    }
+
+    row(itemWidth = 220.dp, itemHeight = 140.dp, key = "trending") { /* a normal rail */ }
+}
+```
+
+**The contract**
+
+| The column owns | The custom row owns |
+|---|---|
+| UP / DOWN between rows | LEFT / RIGHT / ENTER while it is selected |
+| Vertical scrolling to bring the row into view | Whatever it draws inside `height` |
+| The global highlight's Y position | Its own focus treatment, if `showHighlight` is left `false` |
+
+`onKeyEvent` returns `true` to consume the key and `false` to say "I am at my own edge" — the
+column then applies its [focus-escape policy](#focus-escape-per-edge), so focus can leave the list.
+
+`height` is what the column uses to place rows and the highlight, so the content must render at
+exactly that height. `showHighlight = true` draws the global highlight across the full width of the
+row instead of over a card.
+
+### Empty rows
+
+A `row` with zero items is never selectable: UP/DOWN steps straight over it, the highlight never
+parks on it, it renders nothing (not even its header), and it contributes no height. Row indices
+and keys are unaffected, so `onItemSelected(rowIndex, …)` keeps meaning what it meant. The one
+visible trace is the row spacing on either side of it, because `LazyColumn` still allocates spacing
+around a zero-height item — declare rows only when they have content if that matters to you.
+
+---
+
+## Custom Focus Highlight
+
+The `focusHighlight` lambda takes `isFocused` and runs in a `RokuHighlightScope`: a `BoxScope`
+sized to the selected card, plus `rowIndex` and `itemIndex`. One lambda can therefore render a
+different treatment per row:
+
+```kotlin
+RokuLazyColumn(
+    focusHighlight = { isFocused ->
+        DefaultFocusHighlight(
+            isFocused = isFocused,
+            cornerRadius = if (rowIndex == AVATARS_ROW) 80.dp else 12.dp
+        )
+    }
+) { /* rows */ }
+```
+
+Or replace it entirely:
+
+```kotlin
+RokuLazyRow(
+    focusHighlight = { isFocused ->
+        if (isFocused) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .border(4.dp, Color.Blue, RoundedCornerShape(16.dp))
+            )
+        }
+    },
+) { /* items */ }
+```
+
+`DefaultFocusHighlight` takes `borderColor`, `borderWidth`, `cornerRadius`, `overflow` (how far the
+border extends outside the card) and `animateScale`.
+
+---
+
+## Focus Slot
+
+Control where the highlight sits within the visible window:
+
+```kotlin
+RokuLazyRow(focusSlot = 0) { /* items */ }   // leftmost visible item (default)
+RokuLazyRow(focusSlot = 2) { /* items */ }   // 3rd visible slot
+```
+
+At list edges, the highlight automatically shifts to track the actual item position — no empty
+space is ever shown.
+
+---
+
+## Accessibility
+
+The fixed-focus model is a single focusable container by design, which is both what makes it work
+and what limits it. What the library does:
+
+- The container reports itself as a collection (`CollectionInfo`), so a screen reader announces
+  a list rather than an anonymous box.
+- Every item carries `CollectionItemInfo` (its row and column) and `selected`, so the selected
+  card is identifiable in the node tree.
+- If you supply descriptions, the **selected** item's description is surfaced on the container as
+  its `contentDescription`, in a polite live region — so moving the selection re-announces:
+
+```kotlin
+items(movies, key = { it.id }, contentDescription = { it.title }) { movie, isFocused -> /* card */ }
+```
+
+The state-based overloads take `itemContentDescription` / `RokuColumnRowConfig.itemContentDescription`
+instead.
+
+**Honest limits.** There are two cursors, and they are not the same one. D-pad selection moves the
+library's own highlight; a screen reader moves its accessibility cursor. Item nodes are in the tree
+and a screen reader can reach them (explore-by-touch, or swiping through nodes), but they are not
+input-focusable, so reaching one that way does not move the highlight, and moving the highlight does
+not move the screen-reader cursor. What ties the two together is the container's description, which
+is why supplying `contentDescription` matters: without it nothing is announced on selection change,
+and the library will not invent text from your composables.
+
+**Platform support.** These are Compose semantics, and how far they travel differs per platform.
+On **Android** they map onto `AccessibilityNodeInfo` in full — that is where this was verified.
+On **iOS**, Compose Multiplatform 1.10.3 maps a live region to "updates frequently" without the
+politeness mode, and does not map collection info at all. On **desktop** there is no mapping for
+any of them. Treat the accessibility story as an Android feature today.
+
+**What was verified:** the emitted accessibility node tree on an Android TV emulator (API 31),
+inspected with `uiautomator dump` — the container is the single focusable node, its content
+description tracks the selected item across D-pad moves, and each item appears as its own node
+carrying its description and selected state. TalkBack itself was not exercised end to end; if you
+ship this to users, test with TalkBack on a real device.
 
 ---
 
@@ -247,18 +474,20 @@ wiring in `AndroidManifest.xml`:
 `RokuLazyRow` / `RokuLazyColumn` is a single focusable node, so give it focus on entry:
 
 ```kotlin
-val focusRequester = remember { FocusRequester() }
+val columnState = rememberRokuColumnState()
 
 LaunchedEffect(Unit) {
-    delay(100) // wait for measurement + layout
-    focusRequester.requestFocus()
+    delay(100)                  // wait for measurement + layout
+    columnState.requestFocus()
 }
 
-RokuLazyColumn(modifier = Modifier.fillMaxSize().focusRequester(focusRequester)) { /* ... */ }
+RokuLazyColumn(state = columnState, modifier = Modifier.fillMaxSize()) { /* rows */ }
 ```
 
-Leave `allowFocusEscape = true` (the default) so D-pad presses at an edge fall through to a sidebar
-or top bar instead of being swallowed.
+`requestFocus()` returns `false` rather than throwing when the list is not laid out yet, so it is
+safe to call from arbitrary callbacks. Applying your own `Modifier.focusRequester(...)` still works
+too. The DSL `RokuLazyRow` has no state handle by design — use the state-based overload if you need
+one.
 
 ---
 
@@ -268,14 +497,14 @@ or top bar instead of being swallowed.
 val config = RokuFocusConfig(
     highlightAnimationSpec = tween(200, easing = FastOutSlowInEasing),
     keyRepeatDelayMs = 150L,
-    keyRepeatAccelAfter = 3,       // accelerate after 3 consecutive presses
-    keyRepeatFastDelayMs = 50L,    // fast speed once accelerated
-    wrapAround = true,             // wrap from last to first
-    hapticFeedback = true,         // vibrate at boundaries
-    allowFocusEscape = true        // let focus leave the list at edges
+    keyRepeatAccelAfter = 3,        // accelerate after 3 consecutive presses
+    keyRepeatFastDelayMs = 50L,     // fast speed once accelerated
+    wrapAround = true,              // wrap from last to first
+    hapticFeedback = true,          // vibrate at boundaries
+    focusEscape = RokuFocusEscape.All
 )
 
-RokuLazyRow(config = config, ...) { ... }
+RokuLazyRow(config = config) { /* items */ }
 ```
 
 | Parameter | Type | Default | Description |
@@ -286,7 +515,7 @@ RokuLazyRow(config = config, ...) { ... }
 | `keyRepeatFastDelayMs` | `Long` | `50` | Fast repeat delay after acceleration |
 | `wrapAround` | `Boolean` | `false` | Wrap from last item to first and vice versa |
 | `hapticFeedback` | `Boolean` | `true` | Vibrate on boundary hit. No-op on desktop and web. |
-| `allowFocusEscape` | `Boolean` | `true` | Let D-pad at edges pass focus to adjacent composables |
+| `focusEscape` | `RokuFocusEscape` | `All` | Per-edge control over letting focus leave the list |
 
 Built-in animation presets:
 
@@ -298,57 +527,6 @@ RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 
 ---
 
-## Custom Focus Highlight
-
-The default is a white rounded border. Replace it with anything:
-
-```kotlin
-// Fully custom highlight
-RokuLazyRow(
-    focusHighlight = { isFocused ->
-        if (isFocused) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .border(4.dp, Color.Blue, RoundedCornerShape(16.dp))
-            )
-        }
-    },
-    ...
-) { ... }
-
-// Or tweak the default
-RokuLazyRow(
-    focusHighlight = { isFocused ->
-        DefaultFocusHighlight(
-            isFocused = isFocused,
-            borderColor = Color.Cyan,
-            borderWidth = 4.dp,
-            cornerRadius = 16.dp,
-            overflow = 8.dp,        // how far the border extends outside the card
-            animateScale = true     // subtle scale pulse on focus
-        )
-    },
-    ...
-) { ... }
-```
-
----
-
-## Focus Slot
-
-Control where the highlight sits within the visible window:
-
-```kotlin
-RokuLazyRow(focusSlot = 0, ...) { ... }   // leftmost visible item (default)
-RokuLazyRow(focusSlot = 2, ...) { ... }   // 3rd visible slot
-```
-
-At list edges, the highlight automatically shifts to track the actual item position — no empty
-space is ever shown.
-
----
-
 ## API Reference
 
 ### Components
@@ -356,20 +534,23 @@ space is ever shown.
 | Component | Description |
 |---|---|
 | `RokuLazyRow` | Horizontal fixed-focus row. DSL variant auto-measures width; state variant takes explicit `itemWidth`. |
-| `RokuLazyColumn` | Vertical + horizontal OTT grid. DSL variant manages state internally; state variant takes `List<RokuColumnRowConfig>`. |
+| `RokuLazyColumn` | Vertical + horizontal OTT grid. DSL variant manages per-row state internally; state variant takes `List<RokuColumnRowConfig>`. |
+| `RokuLazyColumnScope.row` | A rail of equal-size cards. |
+| `RokuLazyColumnScope.customRow` | Anything else, with LEFT/RIGHT/ENTER delegated to it. |
 | `DefaultFocusHighlight` | Default white rounded-border highlight. `BoxScope` extension, fully replaceable. |
 | `Modifier.rokuKeyHandler` | Low-level D-pad handler, for wiring your own container. |
 
-### State
+### Types
 
-| API | Description |
+| Type | Description |
 |---|---|
-| `rememberRokuFocusListState(itemCount, initialIndex, focusSlot)` | Create remembered state for a row. |
-| `state.selectedIndex` | Current selected item index. |
-| `state.moveNext()` / `state.movePrevious()` | Programmatically navigate. Returns `true` if moved. |
-| `state.scrollTo(index)` | Jump to a specific index. |
-| `state.canScrollForward` / `state.canScrollBackward` | Check if navigation is possible. |
-| `state.updateItemCount(count)` | Update item count (e.g., when data changes). |
+| `RokuColumnState` | Which row is selected; focus control; observable `hasFocus`. |
+| `RokuFocusListState` | Which item of a row is selected. |
+| `RokuFocusConfig` | Navigation behaviour. |
+| `RokuFocusEscape` | Per-edge focus escape. |
+| `RokuHighlightScope` | Receiver of `focusHighlight`: `BoxScope` + `rowIndex`, `itemIndex`. |
+| `RokuNavKey` | `Left` / `Right` / `Enter`, handed to `customRow`'s `onKeyEvent`. |
+| `RokuColumnRowConfig` | One row of the state-based `RokuLazyColumn`. |
 
 ### Callbacks
 
@@ -377,8 +558,28 @@ space is ever shown.
 |---|---|---|
 | `onItemSelected` | Row, Column | Fires when the selected index changes. |
 | `onItemClicked` | Row, Column | Fires on Enter / DpadCenter press. |
-| `onFocusEnter` | Row only | Fires when the row gains focus. |
-| `onFocusExit` | Row only | Fires when the row loses focus. |
+| `onFocusEnter` | Row, Column | Fires when the list gains focus. |
+| `onFocusExit` | Row, Column | Fires when the list loses focus. |
+
+---
+
+## Migrating from 1.x to 2.0
+
+| 1.x | 2.0 | Why |
+|---|---|---|
+| `focusHighlight = { isFocused -> … }` | Unchanged | The lambda gained a `RokuHighlightScope` receiver carrying `rowIndex` and `itemIndex`; `isFocused` stays its parameter, so 1.x highlight lambdas compile as they are. |
+| `RokuFocusConfig(allowFocusEscape = true)` | `RokuFocusConfig(focusEscape = RokuFocusEscape.All)` | Per-edge control. The old spelling still compiles as a deprecated factory that maps to all edges. |
+| `config.allowFocusEscape` | `config.focusEscape` | A deprecated extension property still reads the old flag; `copy(allowFocusEscape = …)` has no equivalent. |
+| `RokuLazyColumn(initialRowIndex = 3)` | `RokuLazyColumn(state = rememberRokuColumnState(initialRowIndex = 3))` | One source of truth for the selected row, matching `LazyColumn` / `rememberLazyListState`. |
+| `row(itemWidth = …, itemHeight = …)` | `row(itemWidth = …, itemHeight = …, key = "trending")` | `key` and `initialIndex` are appended after the 1.x parameters, so positional calls keep their meaning. The key is optional but strongly recommended. |
+| `com.github.reshusingh07:roku-focus-list:1.0.0` | `com.github.souravnoobcoder:roku-focus-list:2.0.0` | Canonical coordinates restored. |
+| Selection lost on rotation | Nothing to do | `rememberRokuFocusListState` and `rememberRokuColumnState` are `rememberSaveable`-backed. |
+| Out-of-range selection clamped forever | Nothing to do | The requested index is remembered and applied when the list grows. |
+| Rows with no items still selectable | Nothing to do | Empty rows are skipped by UP/DOWN and render nothing. |
+
+`Modifier.rokuKeyHandler`, `rememberRokuFocusListState`, `RokuFocusListState.scrollTo` /
+`moveNext` / `movePrevious`, `DefaultFocusHighlight`, `RokuAnimationSpec` and the `items { }` DSL
+keep their 1.x signatures.
 
 ---
 
@@ -409,15 +610,16 @@ which is why no platform-specific source set is needed.
 - **Linking an iOS framework requires macOS.** Compiling the klibs works from any host, including
   Windows, but producing an `.xcframework` needs Xcode.
 - **`headerHeight` in `RokuLazyColumn`'s `row { }` must match the header's real rendered height**,
-  or the vertical highlight lands at the wrong Y.
-- **Selection is not saved across configuration changes.** `RokuFocusListState` uses `remember`, not
-  `rememberSaveable`.
+  and `customRow`'s `height` must match its content, or the vertical highlight lands at the wrong Y.
+- **Layout is left-to-right only.** `RokuFocusEscape.start` / `.end` map to LEFT / RIGHT; nothing
+  mirrors for RTL yet.
+- **Individual items are not accessibility-focusable.** See [Accessibility](#accessibility).
 
 ---
 
 ## Requirements
 
-- **Kotlin** 2.1.0+ (built with 2.2.21)
+- **Kotlin** 2.2.x (built with 2.2.21)
 - **Compose Multiplatform** 1.10.3, or **Jetpack Compose** 1.10.5 / BOM 2026.03.00 for Android-only projects
 - **minSdk** 24 (Android 7.0+)
 - **JDK** 11+ for desktop consumers
@@ -430,28 +632,30 @@ which is why no platform-specific source set is needed.
 | Module | What it is |
 |---|---|
 | `roku-focus-list/` | The library. All code in `src/commonMain/kotlin`, tests in `src/commonTest/kotlin`. |
-| `app/` | Android TV demo app: 100 rows, 6 card types, 5 demo screens. Run on a TV emulator or device. |
+| `app/` | Android TV demo app: 100 rows, 6 card types, 7 demo screens. Run on a TV emulator or device. |
 | `consumer-kmp/` | Verification module — a KMP library whose `commonMain` uses `RokuLazyRow` / `RokuLazyColumn`. |
 | `verification/published-consumer/` | Standalone Gradle build that resolves the **published** artifact from `mavenLocal` in `commonMain`. |
 
 ### Verifying a change
 
 ```bash
-# Library: commonMain, every target, and the shared unit tests
 ./gradlew :roku-focus-list:compileCommonMainKotlinMetadata :roku-focus-list:desktopTest
-./gradlew :roku-focus-list:compileAndroidMain :roku-focus-list:compileKotlinDesktop
-./gradlew :roku-focus-list:compileKotlinIosArm64 :roku-focus-list:compileKotlinIosX64 :roku-focus-list:compileKotlinIosSimulatorArm64
+```
 
-# KMP consumption through a project dependency
+```bash
+./gradlew :roku-focus-list:compileAndroidMain :roku-focus-list:compileKotlinDesktop :roku-focus-list:compileKotlinIosArm64 :roku-focus-list:compileKotlinIosX64 :roku-focus-list:compileKotlinIosSimulatorArm64
+```
+
+```bash
 ./gradlew :consumer-kmp:compileCommonMainKotlinMetadata :consumer-kmp:compileAndroidMain
+```
 
-# Android demo, debug and minified release
+```bash
 ./gradlew :app:assembleDebug :app:assembleRelease
+```
 
-# KMP consumption through the published Maven coordinate
-./gradlew :roku-focus-list:publishToMavenLocal
-./gradlew -p verification/published-consumer verifyCommonMainConsumption
-./gradlew -p verification/published-consumer printRokuFocusResolution
+```bash
+./gradlew :roku-focus-list:publishToMavenLocal && ./gradlew -p verification/published-consumer verifyCommonMainConsumption printRokuFocusResolution
 ```
 
 The standalone consumer needs an Android SDK: set `ANDROID_HOME`, or create
@@ -459,20 +663,41 @@ The standalone consumer needs an Android SDK: set `ANDROID_HOME`, or create
 
 ---
 
+## Releasing
+
+Consumers resolve this library from JitPack, which builds a git tag the first time somebody asks
+for it. Releasing is therefore: bump the version, tag, and make sure JitPack's build of that tag
+actually works before anyone depends on it. The `Release` workflow does the last two.
+
+**1. Bump the version in a PR.** `libraryVersion` in `gradle.properties` is the single source of
+truth. Update it, add the matching `## [x.y.z]` section to [CHANGELOG.md](CHANGELOG.md), and merge.
+The workflow never pushes to `master`; it only creates a tag and a release.
+
+**2. Run the workflow** from the Actions tab, or:
+
+```bash
+gh workflow run release.yml -f version=2.0.1
+```
+
+It refuses to run unless the version is a bare semver string (`2.0.1`, not `v2.0.1` — matching the
+existing tags), matches `libraryVersion`, and is not already tagged. Then it builds every target on
+**JDK 17** (what `jitpack.yml` pins, so the toolchain JitPack will use is exercised first), runs the
+shared tests, publishes to the local Maven repo, and resolves that coordinate from the standalone
+`verification/published-consumer` build. Only then does it tag, cut a GitHub release from the
+changelog section, and request the artifact from JitPack so the build is warm and verified rather
+than discovered broken by the first consumer.
+
+Pass `-f dry_run=true` to run every check without tagging, or `-f prerelease=true` to mark the
+release as a pre-release.
+
+**Why the version is wired to the tag.** JitPack passes the tag it is building in a `VERSION`
+environment variable and then looks for exactly that version in `~/.m2/repository`. If the build
+published a hardcoded version instead, tagging `2.0.1` would publish `2.0.0` and the coordinate
+consumers write would resolve to nothing — the build log would look green. `roku-focus-list`'s
+`version` therefore reads `VERSION` when set and falls back to `libraryVersion` otherwise.
+
+---
+
 ## License
 
-```
-Copyright 2024 RokuFocus contributors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
+Apache License 2.0 — see [LICENSE](LICENSE).

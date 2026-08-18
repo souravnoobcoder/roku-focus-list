@@ -7,28 +7,32 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.CollectionInfo
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.collectionInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -38,90 +42,203 @@ import kotlin.math.roundToInt
 /** Cached per-frame size animation spec — avoids allocation on every recomposition. */
 private val HighlightSizeSpec: AnimationSpec<Float> = tween(durationMillis = 100, easing = FastOutSlowInEasing)
 
+/**
+ * The dp values the column's geometry depends on, per row. Compared by value so the expensive
+ * pixel maths below only reruns when something that actually moves a row changes.
+ */
+private data class RowMetrics(
+    val headerHeight: Dp,
+    val contentHeight: Dp,
+    val itemWidth: Dp,
+    val itemSpacing: Dp,
+    val startPadding: Dp,
+    val endPadding: Dp
+)
+
+/** Plain holder, not snapshot state: nothing observes which row the column last marked focused. */
+private class FocusedRowRef {
+    var value: RokuFocusListState? = null
+}
+
+private class ColumnGeometry(
+    val rowCumOffsetPx: FloatArray,
+    val maxVerticalScrollPx: Float,
+    val topPaddingPx: Float
+)
+
 /** Cached density conversions for the active row — avoids recomputing 6 toPx() calls per frame. */
-private data class ActiveRowGeometry(
+private class ActiveRowPx(
     val headerPx: Float,
-    val startPadPx: Float,
-    val endPadPx: Float,
+    val contentHeightPx: Float,
     val itemWidthPx: Float,
     val itemSpacingPx: Float,
-    val itemHeightPx: Float
+    val startPadPx: Float,
+    val endPadPx: Float
 )
 
 @Composable
 internal fun RokuLazyColumnImpl(
-    rows: List<RokuColumnRowConfig>,
+    rows: List<RokuResolvedRow>,
+    state: RokuColumnState,
     modifier: Modifier = Modifier,
     config: RokuFocusConfig = DefaultRokuFocusConfig,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     rowSpacing: Dp = 24.dp,
-    initialRowIndex: Int = 0,
-    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
     onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    onFocusEnter: (() -> Unit)? = null,
+    onFocusExit: (() -> Unit)? = null,
     rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null,
     itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
 ) {
-    if (rows.isEmpty()) return
+    // Published before anything reads selectedRowIndex, so the row it resolves to is always one
+    // that exists and has something to select.
+    state.syncRows(rows.size) { rows[it].isSelectable }
+
+    if (rows.isEmpty()) {
+        DisposableEffect(state) {
+            onDispose { state.hasFocus = false }
+        }
+        return
+    }
 
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
-
-    val navState = remember { RokuColumnNavState(initialRowIndex, rows.size) }
-    var hasFocus by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
     val lazyColumnState = rememberLazyListState()
+
+    val selectedRowIndex = state.selectedRowIndex
+    val activeRow = rows[selectedRowIndex]
+    val activeItemIndex = rows.selectedItemIndexIn(selectedRowIndex)
+
+    // Rows learn whether they render as focused, so consumers reading RokuFocusListState.hasFocus
+    // see the same thing the header lambda does. The previously focused state is tracked so the
+    // column can retract what it asserted even when that row has since left the list — a hoisted
+    // state must never be left reading "focused" by a column that no longer renders it.
+    val focusedRowState = (activeRow as? RokuResolvedRow.Items)
+        ?.config?.state
+        ?.takeIf { state.hasFocus }
+    val focusedRowRef = remember { FocusedRowRef() }
+    if (focusedRowRef.value !== focusedRowState) {
+        focusedRowRef.value?.hasFocus = false
+        focusedRowState?.hasFocus = true
+        focusedRowRef.value = focusedRowState
+    }
+    DisposableEffect(state) {
+        onDispose {
+            state.hasFocus = false
+            focusedRowRef.value?.hasFocus = false
+            focusedRowRef.value = null
+        }
+    }
+
+    val selectedDescription = (activeRow as? RokuResolvedRow.Items)
+        ?.let { it.config.itemContentDescription?.invoke(it.config.state.selectedIndex) }
+
+    val rowKeys: (Int) -> Any = remember(rows) {
+        if (rows.all { it.key != null }) {
+            { index -> rows[index].key!! }
+        } else {
+            { index -> index }
+        }
+    }
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
-            .focusRequester(focusRequester)
-            .onFocusChanged { hasFocus = it.hasFocus || it.isFocused }
+            .focusRequester(state.focusRequester)
+            .onFocusChanged { focusState ->
+                val newFocus = focusState.hasFocus || focusState.isFocused
+                if (newFocus != state.hasFocus) {
+                    if (newFocus) onFocusEnter?.invoke() else onFocusExit?.invoke()
+                    state.hasFocus = newFocus
+                }
+            }
             .focusable()
-            .rokuColumnKeyHandler(rows, navState, config, onItemSelected, onItemClicked)
+            .semantics {
+                collectionInfo = CollectionInfo(rowCount = rows.size, columnCount = UnknownColumnCount)
+                if (selectedDescription != null) {
+                    contentDescription = selectedDescription
+                    liveRegion = LiveRegionMode.Polite
+                }
+            }
+            .rokuColumnKeyHandler(rows, state, config, onItemSelected, onItemClicked)
     ) {
         val viewportWidthPx = with(density) { maxWidth.toPx() }
-        val selectedRowIndex = navState.selectedRowIndex
 
-        // ── Cached geometry: only recomputed when row config or viewport changes ──
-        val (rowCumOffset, maxVerticalScrollPx, topPaddingPx) = remember(
-            rows, density, contentPadding, rowSpacing, maxWidth, maxHeight, layoutDirection
-        ) {
-            rows.forEach { rowConfig ->
-                val startPad = rowConfig.contentPadding.calculateLeftPadding(layoutDirection)
-                val endPad = rowConfig.contentPadding.calculateRightPadding(layoutDirection)
-                val avail = maxWidth - startPad - endPad
-                val denom = rowConfig.itemWidth + rowConfig.itemSpacing
-                rowConfig.state.visibleCount = if (denom > 0.dp) {
-                    ((avail + rowConfig.itemSpacing) / denom).toInt().coerceAtLeast(1)
-                } else 1
+        // An item row with nothing in it renders nothing at all — no dangling header — so it must
+        // contribute nothing to the geometry either, or every row below it lands at the wrong Y.
+        val metrics = rows.map { row ->
+            when (row) {
+                is RokuResolvedRow.Items -> if (row.isSelectable) {
+                    RowMetrics(
+                        headerHeight = row.headerHeight,
+                        contentHeight = row.contentHeight,
+                        itemWidth = row.config.itemWidth,
+                        itemSpacing = row.config.itemSpacing,
+                        startPadding = row.config.contentPadding.calculateLeftPadding(layoutDirection),
+                        endPadding = row.config.contentPadding.calculateRightPadding(layoutDirection)
+                    )
+                } else {
+                    EmptyRowMetrics
+                }
+
+                is RokuResolvedRow.Custom -> RowMetrics(
+                    headerHeight = row.headerHeight,
+                    contentHeight = row.contentHeight,
+                    itemWidth = 0.dp,
+                    itemSpacing = 0.dp,
+                    startPadding = 0.dp,
+                    endPadding = 0.dp
+                )
             }
+        }
 
+        // How many cards fit each rail, from the real viewport rather than the screen width.
+        rows.forEachIndexed { index, row ->
+            if (row is RokuResolvedRow.Items) {
+                val rowMetrics = metrics[index]
+                val available = maxWidth - rowMetrics.startPadding - rowMetrics.endPadding
+                val denominator = rowMetrics.itemWidth + rowMetrics.itemSpacing
+                val visible = if (denominator > 0.dp) {
+                    ((available + rowMetrics.itemSpacing) / denominator).toInt().coerceAtLeast(1)
+                } else 1
+                if (row.config.state.visibleCount != visible) row.config.state.visibleCount = visible
+            }
+        }
+
+        val geometry = remember(metrics, density, contentPadding, rowSpacing, maxHeight) {
             val topPx = with(density) { contentPadding.calculateTopPadding().toPx() }
             val bottomPx = with(density) { contentPadding.calculateBottomPadding().toPx() }
             val spacingPx = with(density) { rowSpacing.toPx() }
             val viewportHeightPx = with(density) { maxHeight.toPx() }
 
-            val heights = FloatArray(rows.size) { i ->
-                with(density) { (rows[i].headerHeight + rows[i].itemHeight).toPx() }
+            val heights = FloatArray(metrics.size) { i ->
+                with(density) { (metrics[i].headerHeight + metrics[i].contentHeight).toPx() }
             }
-            val cumOffset = FloatArray(rows.size)
-            for (i in 1 until rows.size) {
+            val cumOffset = FloatArray(metrics.size)
+            for (i in 1 until metrics.size) {
                 cumOffset[i] = cumOffset[i - 1] + heights[i - 1] + spacingPx
             }
 
-            val totalContent = topPx + heights.sum() + max(0, rows.size - 1) * spacingPx + bottomPx
-            val maxScroll = (totalContent - viewportHeightPx).coerceAtLeast(0f)
-
-            Triple(cumOffset, maxScroll, topPx)
+            val totalContent = topPx + heights.sum() + max(0, metrics.size - 1) * spacingPx + bottomPx
+            ColumnGeometry(
+                rowCumOffsetPx = cumOffset,
+                maxVerticalScrollPx = (totalContent - viewportHeightPx).coerceAtLeast(0f),
+                topPaddingPx = topPx
+            )
         }
 
         // ── Vertical scroll + overflow correction ──
-        val desiredVerticalScrollPx = rowCumOffset.getOrElse(selectedRowIndex) { 0f }
-        val verticalScrollOverflowPx = (desiredVerticalScrollPx - maxVerticalScrollPx).coerceAtLeast(0f)
+        val desiredVerticalScrollPx = geometry.rowCumOffsetPx.getOrElse(selectedRowIndex) { 0f }
+        val verticalScrollOverflowPx =
+            (desiredVerticalScrollPx - geometry.maxVerticalScrollPx).coerceAtLeast(0f)
 
-        LaunchedEffect(selectedRowIndex) {
-            if (navState.consecutivePresses > config.keyRepeatAccelAfter) {
+        // Keyed on the geometry as well as the selection: scrolling to the last row of a list that
+        // is still loading gets clamped, and once later rows arrive the column would otherwise sit
+        // at that clamped offset while the highlight maths assumed the unclamped one.
+        LaunchedEffect(selectedRowIndex, geometry) {
+            if (state.keyRepeat.consecutivePresses > config.keyRepeatAccelAfter) {
                 lazyColumnState.scrollToItem(selectedRowIndex)
             } else {
                 lazyColumnState.animateScrollToItem(selectedRowIndex)
@@ -129,36 +246,41 @@ internal fun RokuLazyColumnImpl(
         }
 
         // ── Highlight position (density conversions cached per active row) ──
-        val activeRow = rows[selectedRowIndex]
-        val (activeHeaderPx, activeStartPadPx, activeEndPadPx, activeItemWidthPx, activeItemSpacingPx, activeItemHeightPx) = remember(
-            selectedRowIndex, density, layoutDirection
-        ) {
-            val ar = rows[selectedRowIndex]
-            ActiveRowGeometry(
-                headerPx = with(density) { ar.headerHeight.toPx() },
-                startPadPx = with(density) { ar.contentPadding.calculateLeftPadding(layoutDirection).toPx() },
-                endPadPx = with(density) { ar.contentPadding.calculateRightPadding(layoutDirection).toPx() },
-                itemWidthPx = with(density) { ar.itemWidth.toPx() },
-                itemSpacingPx = with(density) { ar.itemSpacing.toPx() },
-                itemHeightPx = with(density) { ar.itemHeight.toPx() }
-            )
+        val activeMetrics = metrics[selectedRowIndex]
+        val activePx = remember(activeMetrics, density) {
+            with(density) {
+                ActiveRowPx(
+                    headerPx = activeMetrics.headerHeight.toPx(),
+                    contentHeightPx = activeMetrics.contentHeight.toPx(),
+                    itemWidthPx = activeMetrics.itemWidth.toPx(),
+                    itemSpacingPx = activeMetrics.itemSpacing.toPx(),
+                    startPadPx = activeMetrics.startPadding.toPx(),
+                    endPadPx = activeMetrics.endPadding.toPx()
+                )
+            }
         }
-        val targetHighlightY = topPaddingPx + verticalScrollOverflowPx + activeHeaderPx
 
-        val activeState = activeRow.state
-        val targetHighlightX = computeHighlightOffsetPx(
-            activeState, activeItemWidthPx, activeItemSpacingPx,
-            activeStartPadPx, activeEndPadPx, viewportWidthPx
-        )
+        val targetHighlightY = geometry.topPaddingPx + verticalScrollOverflowPx + activePx.headerPx
+        val targetHighlightX = if (activeRow is RokuResolvedRow.Items) {
+            computeHighlightOffsetPx(
+                activeRow.config.state, activePx.itemWidthPx, activePx.itemSpacingPx,
+                activePx.startPadPx, activePx.endPadPx, viewportWidthPx
+            )
+        } else {
+            0f
+        }
+        val targetHighlightWidth = if (activeRow is RokuResolvedRow.Items) {
+            activePx.itemWidthPx
+        } else {
+            viewportWidthPx
+        }
 
         // ── Animate highlight: full spec for position, fast tween for size ──
         val spec = config.highlightAnimationSpec
-        val sizeSpec = HighlightSizeSpec
-
         val animatedX by animateFloatAsState(targetHighlightX, spec, label = "hl_x")
         val animatedY by animateFloatAsState(targetHighlightY, spec, label = "hl_y")
-        val animatedWidth by animateFloatAsState(activeItemWidthPx, sizeSpec, label = "hl_w")
-        val animatedHeight by animateFloatAsState(activeItemHeightPx, sizeSpec, label = "hl_h")
+        val animatedWidth by animateFloatAsState(targetHighlightWidth, HighlightSizeSpec, label = "hl_w")
+        val animatedHeight by animateFloatAsState(activePx.contentHeightPx, HighlightSizeSpec, label = "hl_h")
 
         // ── Render ──
         Box(modifier = Modifier.fillMaxSize()) {
@@ -171,44 +293,82 @@ internal fun RokuLazyColumnImpl(
             ) {
                 items(
                     count = rows.size,
-                    key = { it }
+                    key = rowKeys
                 ) { rowIndex ->
-                    val rowConfig = rows[rowIndex]
-                    val isRowFocused = hasFocus && rowIndex == selectedRowIndex
+                    val row = rows[rowIndex]
+                    val isRowFocused = state.hasFocus && rowIndex == selectedRowIndex
 
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        if (rowHeader != null) {
-                            rowHeader(rowIndex, isRowFocused)
-                        }
-                        RokuRowContent(
-                            state = rowConfig.state,
-                            contentPadding = rowConfig.contentPadding,
-                            itemWidth = rowConfig.itemWidth,
-                            itemSpacing = rowConfig.itemSpacing,
-                            itemContent = { itemIndex, isFocused ->
-                                itemContent(rowIndex, itemIndex, isFocused && isRowFocused)
+                        if (row.isSelectable) {
+                            val header = row.header
+                            if (header != null) {
+                                header(isRowFocused)
+                            } else {
+                                rowHeader?.invoke(rowIndex, isRowFocused)
                             }
-                        )
+                        }
+
+                        when (row) {
+                            is RokuResolvedRow.Items -> RokuRowContent(
+                                state = row.config.state,
+                                contentPadding = row.config.contentPadding,
+                                itemWidth = row.config.itemWidth,
+                                itemSpacing = row.config.itemSpacing,
+                                rowIndex = rowIndex,
+                                itemKey = row.itemKey,
+                                itemContentDescription = row.config.itemContentDescription,
+                                itemContent = { itemIndex, isFocused ->
+                                    itemContent(rowIndex, itemIndex, isFocused && isRowFocused)
+                                }
+                            )
+
+                            is RokuResolvedRow.Custom -> Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(row.contentHeight)
+                            ) {
+                                row.content(isRowFocused)
+                            }
+                        }
                     }
                 }
             }
 
             // Single global highlight overlay
-            Box(
-                modifier = Modifier
-                    .graphicsLayer {
-                        translationX = animatedX
-                        translationY = animatedY
-                    }
-                    .layout { measurable, _ ->
-                        val w = animatedWidth.roundToInt().coerceAtLeast(0)
-                        val h = animatedHeight.roundToInt().coerceAtLeast(0)
-                        val placeable = measurable.measure(Constraints.fixed(w, h))
-                        layout(w, h) { placeable.place(0, 0) }
-                    }
-            ) {
-                focusHighlight(hasFocus)
+            if (activeRow.showHighlight && activeRow.isSelectable) {
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            translationX = animatedX
+                            translationY = animatedY
+                        }
+                        .layout { measurable, _ ->
+                            val w = animatedWidth.roundToInt().coerceAtLeast(0)
+                            val h = animatedHeight.roundToInt().coerceAtLeast(0)
+                            val placeable = measurable.measure(Constraints.fixed(w, h))
+                            layout(w, h) { placeable.place(0, 0) }
+                        }
+                ) {
+                    RokuHighlightScopeImpl(
+                        boxScope = this,
+                        rowIndex = selectedRowIndex,
+                        itemIndex = activeItemIndex
+                    ).focusHighlight(state.hasFocus)
+                }
             }
         }
     }
 }
+
+/** `CollectionInfo` treats a negative count as "unknown", which is right for ragged rails. */
+private const val UnknownColumnCount = -1
+
+/** Geometry of a row that renders nothing, so the rows below it are placed where they really are. */
+private val EmptyRowMetrics = RowMetrics(
+    headerHeight = 0.dp,
+    contentHeight = 0.dp,
+    itemWidth = 0.dp,
+    itemSpacing = 0.dp,
+    startPadding = 0.dp,
+    endPadding = 0.dp
+)

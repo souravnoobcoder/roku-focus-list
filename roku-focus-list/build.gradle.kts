@@ -8,8 +8,13 @@ plugins {
     id("maven-publish")
 }
 
-group = "com.github.reshusingh07"
-version = "1.0.0"
+group = "com.github.souravnoobcoder"
+
+// JitPack builds a tag and expects the artifact to land in ~/.m2 under that exact version, so it
+// passes the tag in VERSION. Without honouring it, tagging 2.0.1 would publish 2.0.0 and the
+// coordinate consumers ask for would resolve to nothing.
+version = (System.getenv("VERSION") ?: providers.gradleProperty("libraryVersion").get())
+    .removePrefix("v")
 
 kotlin {
     android {
@@ -50,6 +55,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.compose.mp.runtime)
+            api(libs.compose.mp.runtime.saveable)
             api(libs.compose.mp.foundation)
             api(libs.compose.mp.ui)
             api(libs.compose.mp.animation)

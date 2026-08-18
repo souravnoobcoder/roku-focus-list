@@ -1,10 +1,5 @@
 package com.rokufocus
 
-import androidx.compose.runtime.Stable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -13,26 +8,16 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 
 /**
- * Navigation state for [RokuLazyColumn]. Holds the selected row index,
- * key-repeat timing, and acceleration counter.
- */
-@Stable
-internal class RokuColumnNavState(
-    initialRowIndex: Int,
-    rowCount: Int
-) {
-    var selectedRowIndex by mutableIntStateOf(initialRowIndex.coerceIn(0, maxOf(0, rowCount - 1)))
-    var consecutivePresses by mutableIntStateOf(0)
-    var lastKeyTime by mutableLongStateOf(0L)
-}
-
-/**
- * Key handler for [RokuLazyColumn]. Handles D-pad navigation across both axes:
- * UP/DOWN moves between rows, LEFT/RIGHT delegates to the active row's state.
+ * Key handler for [RokuLazyColumn]. Handles D-pad navigation across both axes: UP/DOWN moves
+ * between rows, skipping rows with nothing to select; LEFT/RIGHT and ENTER go to the active row —
+ * to its item state for a card rail, or to its `onKeyEvent` for a custom row.
+ *
+ * Presses that cannot move anywhere are consumed or not according to
+ * [RokuFocusConfig.focusEscape], per edge.
  */
 internal fun Modifier.rokuColumnKeyHandler(
-    rows: List<RokuColumnRowConfig>,
-    navState: RokuColumnNavState,
+    rows: List<RokuResolvedRow>,
+    state: RokuColumnState,
     config: RokuFocusConfig,
     onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)?,
     onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)?
@@ -40,86 +25,67 @@ internal fun Modifier.rokuColumnKeyHandler(
     if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
     val now = RokuClock.uptimeMillis()
-    if (now - navState.lastKeyTime > 300) navState.consecutivePresses = 0
+    val repeat = state.keyRepeat
+    repeat.resetIfIdle(now)
 
-    val effectiveDelay = if (config.keyRepeatAccelAfter > 0 &&
-        navState.consecutivePresses >= config.keyRepeatAccelAfter
-    ) config.keyRepeatFastDelayMs else config.keyRepeatDelayMs
-
-    val selectedRowIndex = navState.selectedRowIndex
-    val activeRow = rows.getOrNull(selectedRowIndex) ?: return@onPreviewKeyEvent false
-    val activeState = activeRow.state
+    val rowIndex = state.selectedRowIndex
+    val activeRow = rows.getOrNull(rowIndex) ?: return@onPreviewKeyEvent false
+    val escape = config.focusEscape
 
     when (keyEvent.key) {
-        // ── Vertical: move between rows ──
-        Key.DirectionUp -> {
-            if (now - navState.lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
-            if (selectedRowIndex > 0) {
-                navState.selectedRowIndex = (selectedRowIndex - 1).coerceAtLeast(0)
-                navState.lastKeyTime = now
-                navState.consecutivePresses++
-                onItemSelected?.invoke(navState.selectedRowIndex, rows[navState.selectedRowIndex].state.selectedIndex)
+        // ── Vertical: move between rows, stepping over rows with nothing to select ──
+        Key.DirectionUp, Key.DirectionDown -> {
+            if (repeat.isThrottled(now, config)) return@onPreviewKeyEvent true
+            val step = if (keyEvent.key == Key.DirectionUp) -1 else 1
+            val target = nextSelectableRow(rows.size, rowIndex, step) { rows[it].isSelectable }
+            if (target >= 0) {
+                state.moveToRow(target)
+                repeat.accept(now)
+                onItemSelected?.invoke(target, rows.selectedItemIndexIn(target))
                 true
             } else {
-                !config.allowFocusEscape
+                !(if (step < 0) escape.up else escape.down)
             }
         }
 
-        Key.DirectionDown -> {
-            if (now - navState.lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
-            if (selectedRowIndex < rows.size - 1) {
-                navState.selectedRowIndex = (selectedRowIndex + 1).coerceAtMost(rows.size - 1)
-                navState.lastKeyTime = now
-                navState.consecutivePresses++
-                onItemSelected?.invoke(navState.selectedRowIndex, rows[navState.selectedRowIndex].state.selectedIndex)
+        // ── Horizontal: delegate to the active row ──
+        Key.DirectionLeft, Key.DirectionRight -> {
+            if (repeat.isThrottled(now, config)) return@onPreviewKeyEvent true
+            val forward = keyEvent.key == Key.DirectionRight
+            val handled = when (activeRow) {
+                is RokuResolvedRow.Items ->
+                    moveWithinRow(activeRow.config.state, config, forward)
+
+                is RokuResolvedRow.Custom ->
+                    activeRow.onKeyEvent
+                        ?.invoke(if (forward) RokuNavKey.Right else RokuNavKey.Left)
+                        ?: false
+            }
+            if (handled) {
+                repeat.accept(now)
+                if (activeRow is RokuResolvedRow.Items) {
+                    onItemSelected?.invoke(rowIndex, activeRow.config.state.selectedIndex)
+                }
                 true
             } else {
-                !config.allowFocusEscape
+                !(if (forward) escape.end else escape.start)
             }
         }
 
-        // ── Horizontal: delegate to active row's state ──
-        Key.DirectionRight -> {
-            if (now - navState.lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
-            if (config.wrapAround && !activeState.canScrollForward && activeState.itemCount > 1) {
-                activeState.scrollTo(0)
-                navState.lastKeyTime = now
-                navState.consecutivePresses++
-                onItemSelected?.invoke(selectedRowIndex, activeState.selectedIndex)
+        Key.Enter, Key.DirectionCenter, Key.NumPadEnter -> when (activeRow) {
+            is RokuResolvedRow.Items -> {
+                onItemClicked?.invoke(rowIndex, activeRow.config.state.selectedIndex)
                 true
-            } else if (activeState.moveNext()) {
-                navState.lastKeyTime = now
-                navState.consecutivePresses++
-                onItemSelected?.invoke(selectedRowIndex, activeState.selectedIndex)
-                true
-            } else {
-                !config.allowFocusEscape
             }
-        }
 
-        Key.DirectionLeft -> {
-            if (now - navState.lastKeyTime < effectiveDelay) return@onPreviewKeyEvent true
-            if (config.wrapAround && !activeState.canScrollBackward && activeState.itemCount > 1) {
-                activeState.scrollTo(activeState.itemCount - 1)
-                navState.lastKeyTime = now
-                navState.consecutivePresses++
-                onItemSelected?.invoke(selectedRowIndex, activeState.selectedIndex)
-                true
-            } else if (activeState.movePrevious()) {
-                navState.lastKeyTime = now
-                navState.consecutivePresses++
-                onItemSelected?.invoke(selectedRowIndex, activeState.selectedIndex)
-                true
-            } else {
-                !config.allowFocusEscape
-            }
-        }
-
-        Key.Enter, Key.DirectionCenter, Key.NumPadEnter -> {
-            onItemClicked?.invoke(selectedRowIndex, activeState.selectedIndex)
-            true
+            is RokuResolvedRow.Custom ->
+                activeRow.onKeyEvent?.invoke(RokuNavKey.Enter) ?: false
         }
 
         else -> false
     }
 }
+
+/** Item index selected in row [index], or 0 for a custom row that has no item concept. */
+internal fun List<RokuResolvedRow>.selectedItemIndexIn(index: Int): Int =
+    (getOrNull(index) as? RokuResolvedRow.Items)?.config?.state?.selectedIndex ?: 0

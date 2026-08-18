@@ -1,5 +1,5 @@
-# openjdk17 is JitPack's newest option and satisfies AGP 9 (min JDK 17). Local verification
-# was done on JDK 21; a JDK 17 build has not been exercised.
+# openjdk17 is JitPack's newest option and satisfies AGP 9 (min JDK 17). The release workflow
+# builds on JDK 17 too, so what JitPack runs here is exercised before a tag is ever cut.
 jdk:
   - openjdk17
 # Kotlin Multiplatform publishes several modules under the same group: roku-focus-list (root

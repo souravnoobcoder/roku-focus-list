@@ -28,6 +28,7 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 # Compose Multiplatform artifacts. On an Android target Gradle metadata redirects these to
 # the matching androidx.compose.* artifacts, so Android consumers get Jetpack Compose.
 compose-mp-runtime = { group = "org.jetbrains.compose.runtime", name = "runtime", version.ref = "composeMultiplatform" }
+compose-mp-runtime-saveable = { group = "org.jetbrains.compose.runtime", name = "runtime-saveable", version.ref = "composeMultiplatform" }
 compose-mp-foundation = { group = "org.jetbrains.compose.foundation", name = "foundation", version.ref = "composeMultiplatform" }
 compose-mp-ui = { group = "org.jetbrains.compose.ui", name = "ui", version.ref = "composeMultiplatform" }
 compose-mp-animation = { group = "org.jetbrains.compose.animation", name = "animation", version.ref = "composeMultiplatform" }
