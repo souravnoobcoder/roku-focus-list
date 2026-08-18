@@ -26,14 +26,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,9 +52,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rokufocus.demo.ui.theme.RokuFocusTheme
+import com.rokufocus.DefaultFocusHighlight
+import com.rokufocus.DefaultRokuFocusConfig
+import com.rokufocus.RokuColumnState
 import com.rokufocus.RokuFocusConfig
+import com.rokufocus.RokuFocusEscape
 import com.rokufocus.RokuLazyColumn
 import com.rokufocus.RokuLazyRow
+import com.rokufocus.RokuNavKey
+import com.rokufocus.rememberRokuColumnState
 import com.rokufocus.rememberRokuFocusListState
 import kotlinx.coroutines.delay
 
@@ -71,6 +81,8 @@ class MainActivity : ComponentActivity() {
 
 private enum class Screen(val label: String, val icon: String) {
     COLUMN("Column", "C"),
+    MIXED("Mixed", "M"),
+    RESTORE("Restore", "L"),
     ROW("Row", "R"),
     STATE("State", "S"),
     WRAP("Wrap", "W"),
@@ -119,6 +131,15 @@ private fun CardForType(cardType: CardType, movie: MovieItem, isFocused: Boolean
     }
 }
 
+/** Request focus after a short delay to ensure the column is in the tree and laid out. */
+@Composable
+private fun RequestColumnFocusOnAppear(state: RokuColumnState) {
+    LaunchedEffect(state) {
+        delay(100)
+        state.requestFocus()
+    }
+}
+
 /** Request focus after a short delay to ensure the target is in the tree. */
 @Composable
 private fun RequestFocusOnAppear(focusRequester: FocusRequester) {
@@ -134,7 +155,12 @@ private fun RequestFocusOnAppear(focusRequester: FocusRequester) {
 
 @Composable
 fun StreamFocusDemoScreen() {
-    var activeScreen by remember { mutableStateOf(Screen.COLUMN) }
+    var activeScreen by rememberSaveable { mutableStateOf(Screen.COLUMN) }
+
+    // Two destinations sharing one holder is all it takes for rememberSaveable state — which is
+    // what rememberRokuColumnState / rememberRokuFocusListState are built on — to come back where
+    // it was when you navigate away and return.
+    val stateHolder = rememberSaveableStateHolder()
 
     Row(
         modifier = Modifier
@@ -143,13 +169,17 @@ fun StreamFocusDemoScreen() {
     ) {
         Sidebar(activeScreen = activeScreen, onScreenSelect = { activeScreen = it })
 
-        // Each screen manages its own focus internally
-        when (activeScreen) {
-            Screen.COLUMN -> ColumnDslContent()
-            Screen.ROW    -> RowDslContent()
-            Screen.STATE  -> RowStateContent()
-            Screen.WRAP   -> WrapAroundContent()
-            Screen.PLAIN  -> PlainContent()
+        stateHolder.SaveableStateProvider(activeScreen.name) {
+            // Each screen manages its own focus internally
+            when (activeScreen) {
+                Screen.COLUMN  -> ColumnDslContent()
+                Screen.MIXED   -> MixedRowsContent()
+                Screen.RESTORE -> LateRowsContent()
+                Screen.ROW     -> RowDslContent()
+                Screen.STATE   -> RowStateContent()
+                Screen.WRAP    -> WrapAroundContent()
+                Screen.PLAIN   -> PlainContent()
+            }
         }
     }
 }
@@ -160,14 +190,20 @@ fun StreamFocusDemoScreen() {
 
 @Composable
 private fun ColumnDslContent() {
-    val focusRequester = remember { FocusRequester() }
-    RequestFocusOnAppear(focusRequester)
+    val columnState = rememberRokuColumnState()
+    RequestColumnFocusOnAppear(columnState)
 
-    ScreenShell(title = "RokuLazyColumn DSL", subtitle = "$ROW_COUNT rows \u00b7 6 card types \u00b7 fixed-focus") {
+    ScreenShell(
+        title = "RokuLazyColumn DSL",
+        subtitle = "$ROW_COUNT rows \u00b7 6 card types \u00b7 selection survives leaving and returning"
+    ) {
         RokuLazyColumn(
-            modifier = Modifier.fillMaxSize().focusRequester(focusRequester),
+            modifier = Modifier.fillMaxSize(),
+            state = columnState,
             contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
             rowSpacing = 8.dp,
+            // Left goes back to the sidebar; the other three edges stay inside the list.
+            config = DefaultRokuFocusConfig.copy(focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)),
         ) {
             allRows.forEach { rowDef ->
                 row(
@@ -176,9 +212,243 @@ private fun ColumnDslContent() {
                     itemSpacing = rowDef.itemSpacing,
                     contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
                     headerHeight = 30.dp,
+                    key = rowDef.title,
                     header = { isRowFocused -> RowHeaderText(rowDef.title, isRowFocused) }
                 ) {
-                    items(rowDef.items) { movie, isFocused ->
+                    items(
+                        items = rowDef.items,
+                        key = { "${rowDef.title}-${it.id}" },
+                        contentDescription = { it.title }
+                    ) { movie, isFocused ->
+                        CardForType(rowDef.cardType, movie, isFocused)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1b. MIXED ROWS — custom rows between card rails, per-row highlight shapes
+// ─────────────────────────────────────────────────────────────────────────────
+
+private val genres = listOf("Action", "Drama", "Comedy", "Sci-Fi", "Docs", "Kids")
+
+/** Row indices whose highlight is drawn as a circle rather than a rounded rectangle. */
+private const val AVATARS_ROW = 3
+
+@Composable
+private fun MixedRowsContent() {
+    val columnState = rememberRokuColumnState()
+    RequestColumnFocusOnAppear(columnState)
+
+    var heroPage by rememberSaveable { mutableIntStateOf(0) }
+    var genre by rememberSaveable { mutableIntStateOf(0) }
+    val heroes = SampleData.heroBanner
+
+    ScreenShell(
+        title = "Mixed rows",
+        subtitle = "customRow hero + chip strip between rails · circular highlight on avatars · empty rail is skipped"
+    ) {
+        RokuLazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = columnState,
+            contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
+            rowSpacing = 12.dp,
+            config = DefaultRokuFocusConfig.copy(
+                focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
+            ),
+            focusHighlight = { isFocused ->
+                DefaultFocusHighlight(
+                    isFocused = isFocused,
+                    borderColor = if (rowIndex == AVATARS_ROW) Color(0xFF7DE2D1) else Color.White,
+                    cornerRadius = if (rowIndex == AVATARS_ROW) 80.dp else 12.dp
+                )
+            }
+        ) {
+            // A hero pager owns its own left/right; the column keeps up/down and the scroll.
+            customRow(
+                height = 310.dp,
+                key = "hero",
+                onKeyEvent = { navKey ->
+                    when (navKey) {
+                        RokuNavKey.Left -> if (heroPage > 0) { heroPage--; true } else false
+                        RokuNavKey.Right -> if (heroPage < heroes.lastIndex) { heroPage++; true } else false
+                        RokuNavKey.Enter -> true
+                    }
+                }
+            ) { isRowFocused ->
+                HeroPager(movie = heroes[heroPage], page = heroPage, pageCount = heroes.size, isRowFocused = isRowFocused)
+            }
+
+            customRow(
+                height = 44.dp,
+                headerHeight = 30.dp,
+                key = "genres",
+                header = { isRowFocused -> RowHeaderText("Browse", isRowFocused) },
+                onKeyEvent = { navKey ->
+                    when (navKey) {
+                        RokuNavKey.Left -> if (genre > 0) { genre--; true } else false
+                        RokuNavKey.Right -> if (genre < genres.lastIndex) { genre++; true } else false
+                        RokuNavKey.Enter -> true
+                    }
+                }
+            ) { isRowFocused ->
+                GenreChips(selected = genre, isRowFocused = isRowFocused)
+            }
+
+            row(
+                itemWidth = 220.dp,
+                itemHeight = 140.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+                headerHeight = 30.dp,
+                key = "trending",
+                header = { isRowFocused -> RowHeaderText("Trending Now", isRowFocused) }
+            ) {
+                items(SampleData.trending, key = { it.id }, contentDescription = { it.title }) { movie, isFocused ->
+                    MovieCard(movie = movie, isFocused = isFocused)
+                }
+            }
+
+            row(
+                itemWidth = 150.dp,
+                itemHeight = 150.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+                headerHeight = 30.dp,
+                key = "avatars",
+                header = { isRowFocused -> RowHeaderText("Who's watching", isRowFocused) }
+            ) {
+                items(SampleData.featured.take(12), key = { it.id }, contentDescription = { it.title }) { movie, isFocused ->
+                    RoundCard(movie = movie, isFocused = isFocused)
+                }
+            }
+
+            // Declared but empty: up/down steps straight over it and it takes up no height.
+            row(
+                itemWidth = 220.dp,
+                itemHeight = 140.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+                headerHeight = 30.dp,
+                key = "continue-watching",
+                header = { isRowFocused -> RowHeaderText("Continue Watching (empty)", isRowFocused) }
+            ) {
+                items(emptyList<MovieItem>()) { movie, isFocused ->
+                    MovieCard(movie = movie, isFocused = isFocused)
+                }
+            }
+
+            row(
+                itemWidth = 150.dp,
+                itemHeight = 220.dp,
+                contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+                headerHeight = 30.dp,
+                key = "new-releases",
+                header = { isRowFocused -> RowHeaderText("New Releases", isRowFocused) }
+            ) {
+                items(SampleData.newReleases, key = { it.id }, contentDescription = { it.title }) { movie, isFocused ->
+                    PortraitCard(movie = movie, isFocused = isFocused)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroPager(movie: MovieItem, page: Int, pageCount: Int, isRowFocused: Boolean) {
+    Box(modifier = Modifier.fillMaxWidth().height(310.dp).padding(start = 24.dp, end = 48.dp)) {
+        BannerCard(movie = movie, isFocused = isRowFocused)
+        Row(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            repeat(pageCount) { index ->
+                Box(
+                    modifier = Modifier
+                        .size(if (index == page) 10.dp else 6.dp)
+                        .clip(CircleShape)
+                        .background(if (index == page) Color.White else Color.White.copy(alpha = 0.35f))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GenreChips(selected: Int, isRowFocused: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(44.dp).padding(start = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        genres.forEachIndexed { index, genre ->
+            val active = isRowFocused && index == selected
+            Box(
+                modifier = Modifier
+                    .height(36.dp)
+                    .clip(CircleShape)
+                    .background(if (active) Color.White else Color(0xFF1F1F1F))
+                    .padding(horizontal = 18.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = genre,
+                    color = if (active) Color.Black else Color.White.copy(alpha = 0.8f),
+                    fontSize = 14.sp
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1c. LATE ROWS — restoring a selection to a row that does not exist yet
+// ─────────────────────────────────────────────────────────────────────────────
+
+private const val RESTORE_TARGET_ROW = 5
+private const val LATE_ROW_COUNT = 9
+
+@Composable
+private fun LateRowsContent() {
+    val columnState = rememberRokuColumnState()
+    RequestColumnFocusOnAppear(columnState)
+
+    var loadedRows by remember { mutableIntStateOf(1) }
+
+    LaunchedEffect(Unit) {
+        // Asked for while a single placeholder row exists — the state holds the request instead of
+        // clamping it to 0, and applies it the moment row 5 shows up.
+        columnState.selectedRowIndex = RESTORE_TARGET_ROW
+        while (loadedRows < LATE_ROW_COUNT) {
+            delay(700)
+            loadedRows++
+        }
+    }
+
+    ScreenShell(
+        title = "Late-arriving rows",
+        subtitle = "asked for row $RESTORE_TARGET_ROW while 1 row existed · loaded $loadedRows " +
+            "· selected row ${columnState.selectedRowIndex}"
+    ) {
+        RokuLazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = columnState,
+            contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
+            rowSpacing = 8.dp,
+            config = DefaultRokuFocusConfig.copy(
+                focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
+            )
+        ) {
+            allRows.take(loadedRows).forEach { rowDef ->
+                row(
+                    itemWidth = rowDef.itemWidth,
+                    itemHeight = rowDef.itemHeight,
+                    itemSpacing = rowDef.itemSpacing,
+                    contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+                    headerHeight = 30.dp,
+                    key = rowDef.title,
+                    header = { isRowFocused -> RowHeaderText(rowDef.title, isRowFocused) }
+                ) {
+                    items(rowDef.items, key = { "${rowDef.title}-${it.id}" }) { movie, isFocused ->
                         CardForType(rowDef.cardType, movie, isFocused)
                     }
                 }

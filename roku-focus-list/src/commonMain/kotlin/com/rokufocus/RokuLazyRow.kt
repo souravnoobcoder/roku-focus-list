@@ -4,19 +4,15 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
@@ -24,6 +20,12 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.CollectionInfo
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.collectionInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -35,11 +37,13 @@ internal fun RokuLazyRowImpl(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     itemWidth: Dp,
     itemSpacing: Dp = 12.dp,
-    focusHighlight: @Composable BoxScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((index: Int) -> Unit)? = null,
     onItemClicked: ((index: Int) -> Unit)? = null,
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
+    itemKey: ((index: Int) -> Any)? = null,
+    itemContentDescription: ((index: Int) -> String?)? = null,
     itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
 ) {
     if (state.itemCount == 0) return
@@ -48,27 +52,38 @@ internal fun RokuLazyRowImpl(
     val layoutDirection = LocalLayoutDirection.current
     val hapticFeedback = LocalHapticFeedback.current
 
-    val focusRequester = remember { FocusRequester() }
-    var hasFocus by remember { mutableStateOf(false) }
+    // A row that leaves the composition is no longer focused, whatever the last event said.
+    DisposableEffect(state) {
+        onDispose { state.hasFocus = false }
+    }
 
     val onBoundaryHit: (() -> Unit)? = if (config.hapticFeedback) {
         { hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) }
     } else null
+
+    val selectedDescription = itemContentDescription?.invoke(state.selectedIndex)
 
     // BoxWithConstraints gives us the actual viewport width (not full screen),
     // critical when sidebars, insets, or split-screen reduce available space.
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .focusRequester(focusRequester)
+            .focusRequester(state.focusRequester)
             .onFocusChanged { focusState ->
                 val newFocus = focusState.hasFocus || focusState.isFocused
-                if (newFocus != hasFocus) {
+                if (newFocus != state.hasFocus) {
                     if (newFocus) onFocusEnter?.invoke() else onFocusExit?.invoke()
-                    hasFocus = newFocus
+                    state.hasFocus = newFocus
                 }
             }
             .focusable()
+            .semantics {
+                collectionInfo = CollectionInfo(rowCount = 1, columnCount = state.itemCount)
+                if (selectedDescription != null) {
+                    contentDescription = selectedDescription
+                    liveRegion = LiveRegionMode.Polite
+                }
+            }
             .rokuKeyHandler(
                 state = state,
                 config = config,
@@ -90,9 +105,10 @@ internal fun RokuLazyRowImpl(
         val endPaddingDp = contentPadding.calculateRightPadding(layoutDirection)
         val availableWidth = maxWidth - startPaddingDp - endPaddingDp
         val denominator = itemWidth + itemSpacing
-        state.visibleCount = if (denominator > 0.dp) {
+        val computedVisibleCount = if (denominator > 0.dp) {
             ((availableWidth + itemSpacing) / denominator).toInt().coerceAtLeast(1)
         } else 1
+        if (state.visibleCount != computedVisibleCount) state.visibleCount = computedVisibleCount
 
         // Highlight X position using shared utility (handles scroll clamping at edges)
         val targetHighlightX = computeHighlightOffsetPx(
@@ -109,6 +125,8 @@ internal fun RokuLazyRowImpl(
             contentPadding = contentPadding,
             itemWidth = itemWidth,
             itemSpacing = itemSpacing,
+            itemKey = itemKey,
+            itemContentDescription = itemContentDescription,
             itemContent = itemContent
         )
 
@@ -120,7 +138,11 @@ internal fun RokuLazyRowImpl(
                     .width(itemWidth)
                     .fillMaxHeight()
             ) {
-                focusHighlight(hasFocus)
+                RokuHighlightScopeImpl(
+                    boxScope = this,
+                    rowIndex = 0,
+                    itemIndex = state.selectedIndex
+                ).focusHighlight(state.hasFocus)
             }
         }
     }

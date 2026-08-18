@@ -10,6 +10,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CollectionItemInfo
+import androidx.compose.ui.semantics.collectionItemInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -25,6 +30,9 @@ internal fun RokuRowContent(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     itemWidth: Dp,
     itemSpacing: Dp = 12.dp,
+    rowIndex: Int = 0,
+    itemKey: ((index: Int) -> Any)? = null,
+    itemContentDescription: ((index: Int) -> String?)? = null,
     itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
 ) {
     if (state.itemCount == 0) return
@@ -46,10 +54,27 @@ internal fun RokuRowContent(
     ) {
         items(
             count = state.itemCount,
-            key = { it }
+            key = itemKey ?: { it }
         ) { index ->
-            Box(modifier = Modifier.width(itemWidth)) {
-                itemContent(index, index == state.selectedIndex)
+            val isSelected = index == state.selectedIndex
+            Box(
+                modifier = Modifier
+                    .width(itemWidth)
+                    // Unmerged on purpose: merging here was measured on an API 31 TV emulator to
+                    // drop this node's own contentDescription without actually absorbing the
+                    // card's children, leaving a worse tree than not merging at all.
+                    .semantics {
+                        collectionItemInfo = CollectionItemInfo(
+                            rowIndex = rowIndex,
+                            rowSpan = 1,
+                            columnIndex = index,
+                            columnSpan = 1
+                        )
+                        selected = isSelected
+                        itemContentDescription?.invoke(index)?.let { contentDescription = it }
+                    }
+            ) {
+                itemContent(index, isSelected)
             }
         }
     }
