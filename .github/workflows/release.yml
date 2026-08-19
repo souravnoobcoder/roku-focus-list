@@ -3,7 +3,13 @@ name: Release
 # Cut a new published version on demand:
 #   gh workflow run release.yml -f version=2.0.1
 # or from the Actions tab. Bump libraryVersion in gradle.properties first, in a normal PR —
-# this workflow never pushes to master, it only creates a tag and a release.
+# this workflow never pushes to master, it only creates a tag, a release, and a Central deployment.
+#
+# Needs four repository secrets (Settings > Secrets and variables > Actions):
+#   MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD  — a user token from central.sonatype.com
+#   SIGNING_KEY                                      — ascii-armoured GPG private key
+#   SIGNING_KEY_PASSWORD                             — its passphrase
+# The deployment is staged, not released: approve it in the Portal once it validates.
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +18,7 @@ on:
         required: true
         type: string
       dry_run:
-        description: "Run every check but do not tag, release, or ask JitPack to build."
+        description: "Run every check but do not tag, release, or upload anything."
         type: boolean
         default: false
       prerelease:
@@ -23,7 +29,7 @@ on:
 permissions:
   contents: write
 
-# Two releases running at once would race on tags and on JitPack's build slot.
+# Two releases running at once would race on tags and on the Central deployment.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -60,9 +66,15 @@ jobs:
             exit 1
           fi
 
+          # A dry run tags nothing, so an existing tag must not stop it — otherwise the one mode
+          # meant for validating a release cannot validate an already-tagged one.
           if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
-            echo "::error::Tag $VERSION already exists. Releases are immutable; pick a new version."
-            exit 1
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "::warning::Tag $VERSION already exists; a real run would refuse."
+            else
+              echo "::error::Tag $VERSION already exists. Releases are immutable; pick a new version."
+              exit 1
+            fi
           fi
 
           case "$REF_NAME" in
@@ -78,8 +90,8 @@ jobs:
 
           echo "Releasing $VERSION from $REF_NAME (dry_run=$DRY_RUN)."
 
-      # JDK 17 on purpose: it is what jitpack.yml pins, so this run exercises the same toolchain
-      # JitPack will use rather than a newer one that happens to work here.
+      # JDK 17 is the floor AGP 9 requires and what the project is developed on, so CI builds the
+      # same toolchain rather than a newer one that happens to work.
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -107,23 +119,57 @@ jobs:
           set -euo pipefail
           ./gradlew --no-daemon :roku-focus-list:publishToMavenLocal
           # The standalone build resolves the real Maven coordinate from mavenLocal, in commonMain
-          # and per target — the same path a consumer takes off JitPack.
+          # and per target — the same path a consumer takes off Maven Central.
           ./gradlew --no-daemon -p verification/published-consumer \
             verifyCommonMainConsumption printRokuFocusResolution
 
       - name: Check the published version is the one being released
         env:
           VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
-          pom="$HOME/.m2/repository/com/github/${{ github.repository_owner }}/roku-focus-list/$VERSION/roku-focus-list-$VERSION.pom"
-          if [ ! -f "$pom" ]; then
-            echo "::error::Expected $pom after publishToMavenLocal, but it is not there."
-            echo "JitPack looks for exactly this path, so it would serve nothing for tag $VERSION."
-            ls -R "$HOME/.m2/repository/com/github/${{ github.repository_owner }}" || true
+          dir="$HOME/.m2/repository/io/github/$OWNER/roku-focus-list/$VERSION"
+          for f in "roku-focus-list-$VERSION.pom" "roku-focus-list-$VERSION.module" \
+                   "roku-focus-list-$VERSION-sources.jar" "roku-focus-list-$VERSION-javadoc.jar"; do
+            if [ ! -f "$dir/$f" ]; then
+              echo "::error::Missing $dir/$f — Central rejects a deployment without it."
+              ls -R "$HOME/.m2/repository/io/github/$OWNER" || true
+              exit 1
+            fi
+          done
+          # Central validates the POM after upload, so catch an incomplete one here instead.
+          for tag in name description url licenses developers scm; do
+            if ! grep -q "<$tag>" "$dir/roku-focus-list-$VERSION.pom"; then
+              echo "::error::POM has no <$tag>; Central would reject the deployment."
+              exit 1
+            fi
+          done
+          echo "Local publication looks complete."
+
+      # Signing runs here, not only during the upload, so a wrong passphrase or a mangled key
+      # fails on a dry run instead of halfway through a Central deployment.
+      - name: Verify the signing key actually signs
+        env:
+          VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ORG_GRADLE_PROJECT_signingInMemoryKey:-}" ]; then
+            echo "::error::SIGNING_KEY is not set. Central rejects unsigned artifacts."
             exit 1
           fi
-          echo "Published $pom"
+          ./gradlew --no-daemon :roku-focus-list:publishToMavenLocal
+          dir="$HOME/.m2/repository/io/github/$OWNER/roku-focus-list/$VERSION"
+          missing=0
+          for f in "roku-focus-list-$VERSION.pom" "roku-focus-list-$VERSION.module" \
+                   "roku-focus-list-$VERSION-sources.jar" "roku-focus-list-$VERSION-javadoc.jar"; do
+            [ -f "$dir/$f.asc" ] || { echo "::error::No signature for $f"; missing=1; }
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "Every required artifact is signed."
 
       # Written to a file rather than a step output: changelog entries are full of backticks, and
       # interpolating them into a shell command would run them.
@@ -147,12 +193,36 @@ jobs:
           {
             printf '\n## Install\n\n'
             printf '```kotlin\n'
-            printf 'implementation("com.github.%s:roku-focus-list:%s")\n' "$OWNER" "$VERSION"
+            printf 'implementation("io.github.%s:roku-focus-list:%s")\n' "$OWNER" "$VERSION"
             printf '```\n'
           } >> release-notes.md
 
           echo "--- release notes ---"
           cat release-notes.md
+
+      # Uploaded before the tag exists, so a rejected deployment leaves no tag behind. Central is
+      # immutable once released, which is why automaticRelease is off: this stages a deployment
+      # for approval in the Portal rather than publishing irrevocably from CI.
+      - name: Stage the deployment on Maven Central
+        if: ${{ !inputs.dry_run }}
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${ORG_GRADLE_PROJECT_mavenCentralUsername:-}" ] || missing+=(MAVEN_CENTRAL_USERNAME)
+          [ -n "${ORG_GRADLE_PROJECT_mavenCentralPassword:-}" ] || missing+=(MAVEN_CENTRAL_PASSWORD)
+          [ -n "${ORG_GRADLE_PROJECT_signingInMemoryKey:-}" ] || missing+=(SIGNING_KEY)
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing repository secrets: ${missing[*]}"
+            echo "::error::Signing is not optional on Central; refusing to publish unsigned."
+            exit 1
+          fi
+          ./gradlew --no-daemon :roku-focus-list:publishToMavenCentral
+          echo "Staged. Approve it at https://central.sonatype.com/publishing/deployments"
 
       - name: Tag and publish the GitHub release
         if: ${{ !inputs.dry_run }}
@@ -175,60 +245,28 @@ jobs:
           fi
           gh release create "$VERSION" "${args[@]}"
 
-      # JitPack builds a tag the first time somebody asks for it. Doing that here means the build
-      # is already warm — and already known-good — before any consumer hits it.
-      - name: Ask JitPack to build the tag
-        if: ${{ !inputs.dry_run }}
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          base="https://jitpack.io/com/github/$owner/roku-focus-list/$VERSION"
-          log="$base/build.log"
-
-          echo "Build log: $log"
-          ok=false
-          for attempt in $(seq 1 30); do
-            pom=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 120 \
-              "$base/roku-focus-list-$VERSION.pom" || echo 000)
-            # Gradle module metadata is what actually makes a KMP dependency resolve per target.
-            mod=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 120 \
-              "$base/roku-focus-list-$VERSION.module" || echo 000)
-            echo "attempt $attempt: pom=$pom module=$mod"
-            if [ "$pom" = "200" ] && [ "$mod" = "200" ]; then
-              ok=true
-              break
-            fi
-            sleep 30
-          done
-
-          if [ "$ok" != "true" ]; then
-            echo "::error::JitPack has not served $VERSION yet. Tag and release exist; check $log"
-            echo "::error::Re-run just this step by requesting the artifact again once the build finishes."
-            exit 1
-          fi
-          echo "JitPack is serving $VERSION."
-
       - name: Summary
         if: always()
         env:
           VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REPO: ${{ github.repository }}
         run: |
-          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           {
             echo "## roku-focus-list $VERSION"
             echo
-            if [ "${{ inputs.dry_run }}" = "true" ]; then
-              echo "Dry run — nothing was tagged, released, or sent to JitPack."
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "Dry run — nothing was tagged, released, or uploaded."
             else
               echo "- Tag: \`$VERSION\` on \`$GITHUB_SHA\`"
-              echo "- Release: https://github.com/${{ github.repository }}/releases/tag/$VERSION"
-              echo "- JitPack: https://jitpack.io/#$owner/roku-focus-list/$VERSION"
-              echo "- Build log: https://jitpack.io/com/github/$owner/roku-focus-list/$VERSION/build.log"
+              echo "- Release: https://github.com/$REPO/releases/tag/$VERSION"
+              echo "- **Approve the deployment:** https://central.sonatype.com/publishing/deployments"
+              echo
+              echo "It is staged, not live. Nothing resolves until you publish it in the Portal."
             fi
             echo
             echo '```kotlin'
-            echo "implementation(\"com.github.$owner:roku-focus-list:$VERSION\")"
+            echo "implementation(\"io.github.$OWNER:roku-focus-list:$VERSION\")"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

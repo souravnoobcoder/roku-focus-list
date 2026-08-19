@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Publishing moved from JitPack to Maven Central, and the group id from `com.github.souravnoobcoder` to `io.github.souravnoobcoder`. JitPack puts a Kotlin Multiplatform build into multi-module mode, which re-groups every publication under `com.github.owner.repo` and rewrites the Gradle metadata; `commonMain` resolution then fails looking for artifacts that were never published. Verified against the 2.0.0 tag JitPack actually built.
+
 ### Added
 
 - Repository scaffolding: CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue/PR templates, CI workflow, funding config.

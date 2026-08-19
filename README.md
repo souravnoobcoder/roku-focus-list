@@ -1,6 +1,6 @@
 # RokuFocus
 
-[![JitPack](https://jitpack.io/v/souravnoobcoder/roku-focus-list.svg)](https://jitpack.io/#souravnoobcoder/roku-focus-list)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.souravnoobcoder/roku-focus-list.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/io.github.souravnoobcoder/roku-focus-list)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.21-blue.svg)](https://kotlinlang.org)
 [![Compose Multiplatform](https://img.shields.io/badge/Compose%20Multiplatform-1.10.3-blue.svg)](https://www.jetbrains.com/lp/compose-multiplatform/)
 [![API](https://img.shields.io/badge/API-24%2B-brightgreen.svg)](https://developer.android.com/about/versions/nougat)
@@ -66,19 +66,7 @@ kotlin {
 
 ## Installation
 
-**Step 1.** Add JitPack to your `settings.gradle.kts`:
-
-```kotlin
-dependencyResolutionManagement {
-    repositories {
-        google()
-        mavenCentral()
-        maven { url = uri("https://jitpack.io") }
-    }
-}
-```
-
-**Step 2.** Add the dependency.
+Published to Maven Central, so `mavenCentral()` in your repositories is all the setup there is.
 
 ### From a Kotlin Multiplatform project (`commonMain`)
 
@@ -86,7 +74,7 @@ dependencyResolutionManagement {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("com.github.souravnoobcoder:roku-focus-list:2.0.0")
+            implementation("io.github.souravnoobcoder:roku-focus-list:2.0.0")
         }
     }
 }
@@ -99,7 +87,7 @@ for `commonMain`, the AAR for Android, a jar for desktop, klibs for iOS.
 
 ```kotlin
 dependencies {
-    implementation("com.github.souravnoobcoder:roku-focus-list:2.0.0")
+    implementation("io.github.souravnoobcoder:roku-focus-list:2.0.0")
 }
 ```
 
@@ -572,7 +560,7 @@ RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 | `config.allowFocusEscape` | `config.focusEscape` | A deprecated extension property still reads the old flag; `copy(allowFocusEscape = …)` has no equivalent. |
 | `RokuLazyColumn(initialRowIndex = 3)` | `RokuLazyColumn(state = rememberRokuColumnState(initialRowIndex = 3))` | One source of truth for the selected row, matching `LazyColumn` / `rememberLazyListState`. |
 | `row(itemWidth = …, itemHeight = …)` | `row(itemWidth = …, itemHeight = …, key = "trending")` | `key` and `initialIndex` are appended after the 1.x parameters, so positional calls keep their meaning. The key is optional but strongly recommended. |
-| `com.github.reshusingh07:roku-focus-list:1.0.0` | `com.github.souravnoobcoder:roku-focus-list:2.0.0` | Canonical coordinates restored. |
+| `com.github.reshusingh07:roku-focus-list:1.0.0` | `io.github.souravnoobcoder:roku-focus-list:2.0.0` | Moved from JitPack to Maven Central. JitPack cannot serve a Kotlin Multiplatform publication: six publications put it into multi-module mode, which re-groups the artifacts and rewrites the Gradle metadata until `commonMain` resolution breaks. Drop the `jitpack.io` repository line. |
 | Selection lost on rotation | Nothing to do | `rememberRokuFocusListState` and `rememberRokuColumnState` are `rememberSaveable`-backed. |
 | Out-of-range selection clamped forever | Nothing to do | The requested index is remembered and applied when the list grows. |
 | Rows with no items still selectable | Nothing to do | Empty rows are skipped by UP/DOWN and render nothing. |
@@ -665,13 +653,12 @@ The standalone consumer needs an Android SDK: set `ANDROID_HOME`, or create
 
 ## Releasing
 
-Consumers resolve this library from JitPack, which builds a git tag the first time somebody asks
-for it. Releasing is therefore: bump the version, tag, and make sure JitPack's build of that tag
-actually works before anyone depends on it. The `Release` workflow does the last two.
+Published to Maven Central through the Sonatype Central Portal. Releasing is: bump the version,
+run the workflow, approve the staged deployment.
 
 **1. Bump the version in a PR.** `libraryVersion` in `gradle.properties` is the single source of
 truth. Update it, add the matching `## [x.y.z]` section to [CHANGELOG.md](CHANGELOG.md), and merge.
-The workflow never pushes to `master`; it only creates a tag and a release.
+The workflow never pushes to `master`; it only creates a tag, a release, and a staged deployment.
 
 **2. Run the workflow** from the Actions tab, or:
 
@@ -679,22 +666,37 @@ The workflow never pushes to `master`; it only creates a tag and a release.
 gh workflow run release.yml -f version=2.0.1
 ```
 
-It refuses to run unless the version is a bare semver string (`2.0.1`, not `v2.0.1` — matching the
-existing tags), matches `libraryVersion`, and is not already tagged. Then it builds every target on
-**JDK 17** (what `jitpack.yml` pins, so the toolchain JitPack will use is exercised first), runs the
-shared tests, publishes to the local Maven repo, and resolves that coordinate from the standalone
-`verification/published-consumer` build. Only then does it tag, cut a GitHub release from the
-changelog section, and request the artifact from JitPack so the build is warm and verified rather
-than discovered broken by the first consumer.
+It refuses to run unless the version is a bare semver string, matches `libraryVersion`, and is not
+already tagged. Then it builds every target on JDK 17, runs the shared tests, publishes to the
+local Maven repo, resolves that coordinate from the standalone `verification/published-consumer`
+build, and checks the POM carries everything Central validates — because Central validates *after*
+upload, and a rejection there is a slower way to learn the same thing.
 
-Pass `-f dry_run=true` to run every check without tagging, or `-f prerelease=true` to mark the
-release as a pre-release.
+Only then does it upload. Central comes before tagging on purpose: a rejected deployment should not
+leave a tag behind.
 
-**Why the version is wired to the tag.** JitPack passes the tag it is building in a `VERSION`
-environment variable and then looks for exactly that version in `~/.m2/repository`. If the build
-published a hardcoded version instead, tagging `2.0.1` would publish `2.0.0` and the coordinate
-consumers write would resolve to nothing — the build log would look green. `roku-focus-list`'s
-`version` therefore reads `VERSION` when set and falls back to `libraryVersion` otherwise.
+**3. Approve the deployment** at [central.sonatype.com/publishing/deployments](https://central.sonatype.com/publishing/deployments).
+It is staged, not live — nothing resolves until you publish it. Central is immutable once released,
+which is why that button is yours and not CI's.
+
+Pass `-f dry_run=true` to run every check without tagging or uploading.
+
+### One-time setup
+
+Four repository secrets under Settings → Secrets and variables → Actions:
+
+| Secret | What it is |
+|---|---|
+| `MAVEN_CENTRAL_USERNAME` / `MAVEN_CENTRAL_PASSWORD` | A **user token** from central.sonatype.com, not your login |
+| `SIGNING_KEY` | ASCII-armoured GPG private key (`gpg --export-secret-keys --armor <id>`) |
+| `SIGNING_KEY_PASSWORD` | Its passphrase |
+
+The `io.github.souravnoobcoder` namespace is granted automatically when the Central account is
+created via GitHub.
+
+Signing is conditional in the build: without a key, `publishToMavenLocal` still works, so
+contributors are not blocked. The workflow refuses to upload if the key is missing rather than
+publishing unsigned.
 
 ---
 
