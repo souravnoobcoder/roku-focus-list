@@ -18,7 +18,7 @@ on:
         required: true
         type: string
       dry_run:
-        description: "Run every check but do not tag, release, or ask JitPack to build."
+        description: "Run every check but do not tag, release, or upload anything."
         type: boolean
         default: false
       prerelease:
@@ -29,7 +29,7 @@ on:
 permissions:
   contents: write
 
-# Two releases running at once would race on tags and on JitPack's build slot.
+# Two releases running at once would race on tags and on the Central deployment.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -84,8 +84,8 @@ jobs:
 
           echo "Releasing $VERSION from $REF_NAME (dry_run=$DRY_RUN)."
 
-      # JDK 17 on purpose: it is what jitpack.yml pins, so this run exercises the same toolchain
-      # JitPack will use rather than a newer one that happens to work here.
+      # JDK 17 is the floor AGP 9 requires and what the project is developed on, so CI builds the
+      # same toolchain rather than a newer one that happens to work.
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -163,7 +163,7 @@ jobs:
           {
             printf '\n## Install\n\n'
             printf '```kotlin\n'
-            printf 'implementation("com.github.%s:roku-focus-list:%s")\n' "$OWNER" "$VERSION"
+            printf 'implementation("io.github.%s:roku-focus-list:%s")\n' "$OWNER" "$VERSION"
             printf '```\n'
           } >> release-notes.md
 
