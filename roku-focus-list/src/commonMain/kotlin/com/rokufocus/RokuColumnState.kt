@@ -42,6 +42,14 @@ class RokuColumnState(initialRowIndex: Int = 0) {
     private var _rowCount by mutableIntStateOf(0)
 
     /**
+     * Raw window-start row for a [RokuLazyColumn] in vertical [RokuFocusMode.Floating]. The column
+     * owns containment (only it knows the pixel geometry); it stores the anchor here so a hoisted
+     * state restores the window along with the selection. Stored raw and clamped on read, like
+     * [requestedRowIndex].
+     */
+    internal var windowAnchorRow by mutableIntStateOf(0)
+
+    /**
      * Plain field, not snapshot state: it is re-assigned from composition on every pass, and the
      * observable values it reads (each row's item count) already invalidate the readers of
      * [selectedRowIndex].
@@ -102,10 +110,17 @@ class RokuColumnState(initialRowIndex: Int = 0) {
     }
 
     companion object {
-        /** Saves the requested row index, mirroring how `LazyListState.Saver` stores its indices. */
+        /**
+         * Saves the requested row index and the floating window anchor, mirroring how
+         * `LazyListState.Saver` stores its indices.
+         */
         val Saver: Saver<RokuColumnState, *> = listSaver(
-            save = { listOf(it.requestedRowIndex) },
-            restore = { RokuColumnState(initialRowIndex = it[0]) }
+            save = { listOf(it.requestedRowIndex, it.windowAnchorRow) },
+            restore = {
+                RokuColumnState(initialRowIndex = it[0]).also { restored ->
+                    restored.windowAnchorRow = it[1]
+                }
+            }
         )
     }
 }

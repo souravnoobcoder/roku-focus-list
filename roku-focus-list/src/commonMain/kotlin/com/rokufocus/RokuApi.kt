@@ -47,7 +47,8 @@ import androidx.compose.ui.unit.dp
  * @param config Navigation behavior (animation, key repeat, haptics, wrap-around, focus escape).
  * @param contentPadding Padding around the row content.
  * @param itemSpacing Horizontal gap between items.
- * @param focusSlot Which visible slot the highlight sits at (0 = leftmost).
+ * @param focusSlot Which visible slot the highlight sits at (0 = leftmost). Ignored in
+ *   [RokuFocusMode.Floating].
  * @param initialIndex Item selected the first time the row's state is created. It is remembered as
  *   a request, so an index that only becomes valid once items arrive is honored then rather than
  *   clamped away.
@@ -56,6 +57,9 @@ import androidx.compose.ui.unit.dp
  * @param onItemClicked Called on Enter/DpadCenter press.
  * @param onFocusEnter Called when this row gains focus.
  * @param onFocusExit Called when this row loses focus.
+ * @param focusMode How the highlight relates to scrolling: parked at [focusSlot] while content
+ *   scrolls ([RokuFocusMode.Static]), or walking the visible items and scrolling only at the
+ *   window's edges ([RokuFocusMode.Floating]).
  * @param content Item declarations via [RokuItemScope.items].
  */
 @Composable
@@ -71,6 +75,7 @@ fun RokuLazyRow(
     onItemClicked: ((index: Int) -> Unit)? = null,
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
+    focusMode: RokuFocusMode = RokuFocusMode.Static,
     content: RokuItemScope.() -> Unit
 ) {
     val scope = RokuItemScope().apply(content)
@@ -80,7 +85,8 @@ fun RokuLazyRow(
     val state = rememberRokuFocusListState(
         itemCount = scope.itemCount,
         initialIndex = initialIndex,
-        focusSlot = focusSlot
+        focusSlot = focusSlot,
+        focusMode = focusMode
     )
     val density = LocalDensity.current
     val itemContent = scope.itemContent
@@ -220,6 +226,10 @@ fun RokuLazyRow(
  * @param onItemClicked Called on Enter/DpadCenter. Receives `(rowIndex, itemIndex)`.
  * @param onFocusEnter Called when the column gains focus.
  * @param onFocusExit Called when the column loses focus.
+ * @param verticalFocusMode How the highlight relates to vertical scrolling: pinned to the top row
+ *   while rows scroll behind it ([RokuFocusMode.Static]), or walking the visible rows and
+ *   scrolling only at the window's edges ([RokuFocusMode.Floating]). Each row's horizontal mode is
+ *   its own `focusMode`; the two axes are independent.
  * @param content Row declarations via [RokuLazyColumnScope.row] and
  *   [RokuLazyColumnScope.customRow].
  */
@@ -235,6 +245,7 @@ fun RokuLazyColumn(
     onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
+    verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
     content: RokuLazyColumnScope.() -> Unit
 ) {
     val scope = RokuLazyColumnScope().apply(content)
@@ -250,7 +261,8 @@ fun RokuLazyColumn(
                     rememberRokuFocusListState(
                         itemCount = spec.itemCount,
                         initialIndex = spec.initialIndex,
-                        focusSlot = spec.focusSlot
+                        focusSlot = spec.focusSlot,
+                        focusMode = spec.focusMode
                     )
                 }
                 RokuResolvedRow.Items(
@@ -289,6 +301,7 @@ fun RokuLazyColumn(
         config = config,
         contentPadding = contentPadding,
         rowSpacing = rowSpacing,
+        verticalFocusMode = verticalFocusMode,
         focusHighlight = focusHighlight,
         onItemSelected = onItemSelected,
         onItemClicked = onItemClicked,
@@ -323,6 +336,10 @@ fun RokuLazyColumn(
  * @param onFocusEnter Called when the column gains focus.
  * @param onFocusExit Called when the column loses focus.
  * @param rowHeader Optional composable above each row. Height **must** match [RokuColumnRowConfig.headerHeight].
+ * @param verticalFocusMode How the highlight relates to vertical scrolling: pinned to the top row
+ *   while rows scroll behind it ([RokuFocusMode.Static]), or walking the visible rows and
+ *   scrolling only at the window's edges ([RokuFocusMode.Floating]). Each row's horizontal mode is
+ *   its state's `focusMode`; the two axes are independent.
  * @param itemContent Composable for each item. Receives `(rowIndex, itemIndex, isFocused)`.
  */
 @Composable
@@ -339,6 +356,7 @@ fun RokuLazyColumn(
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
     rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null,
+    verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
     itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
 ) {
     val resolvedRows = rows.map { rowConfig ->
@@ -352,6 +370,7 @@ fun RokuLazyColumn(
         config = config,
         contentPadding = contentPadding,
         rowSpacing = rowSpacing,
+        verticalFocusMode = verticalFocusMode,
         focusHighlight = focusHighlight,
         onItemSelected = onItemSelected,
         onItemClicked = onItemClicked,

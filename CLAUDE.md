@@ -21,12 +21,13 @@ platform API.
 | `RokuRowContent.kt` | Internal pure LazyRow renderer. No focus, no highlight. Scrolls via `animateScrollToItem(windowStart)`. |
 | `RokuLazyRow.kt` | `RokuLazyRowImpl` — **standalone** horizontal row. `RokuRowContent` + focusable + key handler + highlight overlay. For use outside a column. |
 | `RokuLazyColumn.kt` | `RokuLazyColumnImpl` — **OTT layout**. Single focusable composable. LazyColumn of `RokuRowContent` items. Renders ONE global highlight that animates X/Y/width/height between rows. Uses `BoxWithConstraints` for accurate viewport measurement. |
-| `RokuFocusListState.kt` | State holder per row. `selectedIndex` is **derived** from `requestedIndex` coerced into the current range; `windowStart` / `highlightSlot` / `visibleCount` as before, plus `Saver`, `hasFocus`, `requestFocus()`. Also holds `computeHighlightOffsetPx()`. |
+| `RokuFocusListState.kt` | State holder per row. `selectedIndex` is **derived** from `requestedIndex` coerced into the current range; `windowStart` / `highlightSlot` / `visibleCount` as before, plus `Saver`, `hasFocus`, `requestFocus()`, `focusMode` and the raw floating `windowAnchor`. Also holds `computeHighlightOffsetPx()`. |
 | `RokuColumnState.kt` | Public column state: derived `selectedRowIndex`, `requestedRowIndex`, `rowCount`, `hasSelectableRow`, `hasFocus`, `requestFocus()`, `Saver`, `rememberRokuColumnState`. |
 | `RokuRowSelection.kt` | Pure `nextSelectableRow` / `nearestSelectableRow` — how UP/DOWN steps over rows with nothing to select. |
 | `RokuResolvedRow.kt` | Internal sealed view of a column row (`Items` rail vs consumer-drawn `Custom`) + the `RokuNavKey` enum handed to `customRow`. |
 | `RokuHighlightScope.kt` | Receiver of `focusHighlight`: `BoxScope` + `rowIndex` / `itemIndex`. `isFocused` stays a lambda parameter so 1.x highlight lambdas still compile. |
 | `RokuFocusEscape.kt` | Per-edge focus escape (`start`, `end`, `up`, `down`) with `All` / `None` / `Horizontal` / `Vertical` presets. |
+| `RokuFocusMode.kt` | `Static` (fixed slot, content scrolls — default) vs `Floating` (highlight walks the window, scrolls only at its edges). Per axis: horizontal on `RokuFocusListState.focusMode`, vertical via `RokuLazyColumn(verticalFocusMode = ...)`. |
 | `RokuKeyRepeat.kt` | `RokuKeyRepeatTracker` — key-repeat throttle + acceleration counters, held by the state objects. Plain fields, never read during composition. |
 | `RokuColumnRowConfig.kt` | Per-row config for the state-based `RokuLazyColumn`: state, itemWidth/Height, spacing, contentPadding, headerHeight, key, itemContentDescription. |
 | `RokuFocusHighlight.kt` | `DefaultFocusHighlight` — BoxScope extension. Rounded border drawn OUTSIDE card bounds via `drawBehind` + `graphicsLayer { clip = false }` with configurable `overflow` (default 6dp). |
@@ -39,7 +40,7 @@ platform API.
 Tests live in `src/commonTest/kotlin/com/rokufocus/` and run on the desktop JVM target
 (`:roku-focus-list:desktopTest`): `RokuFocusListStateTest`, `RokuColumnStateTest`,
 `RokuRowSelectionTest`, `RokuRowMovementTest`, `RokuFocusEscapeTest`,
-`RokuKeyRepeatTrackerTest`, `RokuHighlightOffsetTest`, `RokuClockTest`.
+`RokuKeyRepeatTrackerTest`, `RokuHighlightOffsetTest`, `RokuFloatingWindowTest`, `RokuClockTest`.
 
 ### Key design decisions
 
@@ -49,6 +50,7 @@ Tests live in `src/commonTest/kotlin/com/rokufocus/` and run on the desktop JVM 
 - **RokuLazyColumn uses a single global highlight** that animates all 4 dimensions (X, Y, width, height) when navigating between rows. Per-row highlights were removed — `RokuRowContent` is highlight-free.
 - **`RokuColumnRowConfig.headerHeight`** must match actual rendered header height for correct vertical highlight Y positioning. The Y calculation: `topPadding + verticalScrollOverflow + headerHeight`.
 - **Selection is derived, never stored coerced.** Both state objects keep the raw *requested* index and coerce on read. That is what makes "restore to row 5 while one row exists" land on row 5 once the rows arrive, and it means there is exactly one coercion site.
+- **Floating mode stores a raw window anchor, contained at write time.** `RokuFocusListState.windowAnchor` / `RokuColumnState.windowAnchorRow` follow the requested-index philosophy: stored raw, bounds-clamped on read, so a shrunken list gives the window back when items return. Containment (shifting the anchor minimally when the selection exits the window) runs from the writes — `scrollTo`, `updateItemCount`, the `visibleCount` setter, and for the column from composition in `RokuLazyColumnImpl`, the only place the pixel geometry exists. It is deliberately NOT in the `windowStart` getter: a read-side shift that is never stored flip-flops back to the stale anchor on the next in-window move. Containment compares against the *clamped* window so a purely data-driven shrink never overwrites the raw anchor. Both anchors are in the `Saver`s. `focusSlot` is ignored while floating. In `Static` mode every code path is unchanged.
 - **A row with zero items is not selectable.** UP/DOWN steps over it, the highlight never parks on it, it renders nothing (not even its header) and contributes zero height to the column geometry. Its row index and key are unchanged.
 - **The column re-scrolls when the geometry changes, not only when the selection does.** `animateScrollToItem` clamps at the end of a still-loading list; without re-running when rows arrive, the real scroll offset diverges from the offset the highlight maths assumes.
 - **`RokuLazyColumn` retracts `hasFocus` from the row state it last marked**, so a hoisted row state is never left reading "focused" by a column that no longer renders it.
@@ -63,23 +65,35 @@ maxScrollPx = max(0, totalContent - viewport)
 desiredScrollPx = windowStart * stepPx
 scrollOverflowPx = max(0, desiredScroll - maxScroll)
 highlightX = startPadPx + scrollOverflowPx + highlightSlot * stepPx
+
+windowStart:  Static   = clamp(selectedIndex - focusSlot, 0, itemCount - visibleCount)
+              Floating = clamp(windowAnchor, 0, itemCount - visibleCount)
 ```
+In Floating the anchor only moves on containment (selection exits the window: forward to
+`selected - visibleCount + 1`, backward to `selected`), so `highlightSlot` walks 0..visibleCount-1
+and the same X formula follows it — no separate floating math.
 
 ### Highlight positioning math (vertical, in RokuLazyColumn)
 ```
 rowCumOffset[i] = sum of (rowHeight[j] + spacing) for j in 0..<i
 totalColumnContent = topPad + sum(rowHeights) + (rows-1)*spacing + bottomPad
 maxVerticalScroll = max(0, totalColumnContent - viewportHeight)
-desiredVerticalScroll = rowCumOffset[selectedRowIndex]    // empty rows contribute 0 height
+scrollTargetRow = Static   -> selectedRowIndex
+                  Floating -> containVerticalWindow(windowAnchorRow, ...)  // pixel-based, minimal shift
+desiredVerticalScroll = rowCumOffset[scrollTargetRow]     // empty rows contribute 0 height
 verticalOverflow = max(0, desired - max)
-highlightY = topPad + verticalOverflow + headerHeight[selectedRow]
+windowOffset = rowCumOffset[selectedRow] - desired        // 0 in Static
+highlightY = topPad + windowOffset + verticalOverflow + headerHeight[selectedRow]
 ```
+Vertical floating containment is pixel-based (rows have heterogeneous heights): the selected row's
+`[top, top+height]` span must fit in `[rowCumOffset[anchor], rowCumOffset[anchor] + viewportHeight - topPad]`;
+the anchor advances to the first row that fits it, or retreats to the selected row itself.
 
 ## Demo app: `app/`
 
 Android-only (`com.android.application`). `ROW_COUNT = 100` rows generated by cycling 9 `baseRows`,
-6 card types, 7 demo screens (Column DSL, Mixed rows, Late-arriving rows, Row DSL, Row + State,
-Wrap-Around, Plain Compose comparison). Images from `picsum.photos`. Screens are wrapped in a
+6 card types, 8 demo screens (Column DSL, Mixed rows, Late-arriving rows, Row DSL, Row + State,
+Wrap-Around, Floating Focus, Plain Compose comparison). Images from `picsum.photos`. Screens are wrapped in a
 `rememberSaveableStateHolder` so selection survives switching destinations.
 
 | Card | File | Size | Used in |
@@ -115,7 +129,7 @@ Wrap-Around, Plain Compose comparison). Images from `picsum.photos`. Screens are
 
 ## Publishing
 
-- Group `io.github.souravnoobcoder`, artifact `roku-focus-list`, version `2.0.0`, published to Maven Central via the Sonatype Central Portal (`com.vanniktech.maven.publish`).
+- Group `io.github.souravnoobcoder`, artifact `roku-focus-list`, version `2.1.0`, published to Maven Central via the Sonatype Central Portal (`com.vanniktech.maven.publish`).
 - **JitPack cannot serve this library.** Six KMP publications trip its multi-module handling: it re-groups everything under `com.github.owner.repo` and rewrites the metadata, after which a `commonMain` dependency fails on `Could not find roku-focus-list-iosarm64-<v>.jar`. Verified against the real 2.0.0 tag it built. Do not go back.
 - KMP `maven-publish` creates 6 publications: `kotlinMultiplatform` (root, carries the commonMain metadata variant and redirects), `android`, `desktop`, `iosArm64`, `iosSimulatorArm64`, `iosX64`.
 - Consumers only ever reference the root coordinate.

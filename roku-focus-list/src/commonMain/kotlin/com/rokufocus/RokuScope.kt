@@ -122,6 +122,7 @@ class RokuLazyColumnScope internal constructor() {
             val contentPadding: PaddingValues,
             val focusSlot: Int,
             val initialIndex: Int,
+            val focusMode: RokuFocusMode,
             val header: (@Composable (isRowFocused: Boolean) -> Unit)?,
             val itemCount: Int,
             val itemKey: ((Int) -> Any)?,
@@ -148,7 +149,8 @@ class RokuLazyColumnScope internal constructor() {
      * @param itemSpacing Horizontal gap between cards.
      * @param contentPadding Horizontal padding around the row content.
      * @param headerHeight Height of the [header] composable. Must match actual rendered height.
-     * @param focusSlot Which visible slot the highlight sits at (0 = leftmost).
+     * @param focusSlot Which visible slot the highlight sits at (0 = leftmost). Ignored in
+     *   [RokuFocusMode.Floating].
      * @param initialIndex Item selected the first time this row's state is created. It is
      *   remembered as a request, so an index that only becomes valid once items arrive is honored
      *   then rather than clamped away.
@@ -157,6 +159,8 @@ class RokuLazyColumnScope internal constructor() {
      *   remembered against this key, so without it selection stays attached to the *position* and
      *   silently moves to a different row. Keys must be unique within the column and savable.
      *   It sits after the sizing parameters so that 1.x positional calls keep their meaning.
+     * @param focusMode How this row's highlight relates to horizontal scrolling; see
+     *   [RokuFocusMode]. [focusSlot] only applies in [RokuFocusMode.Static].
      * @param header Optional composable rendered above the row. Receives `isRowFocused`.
      * @param content Item declarations via [RokuItemScope.items].
      */
@@ -169,6 +173,7 @@ class RokuLazyColumnScope internal constructor() {
         focusSlot: Int = 0,
         initialIndex: Int = 0,
         key: Any? = null,
+        focusMode: RokuFocusMode = RokuFocusMode.Static,
         header: (@Composable (isRowFocused: Boolean) -> Unit)? = null,
         content: RokuItemScope.() -> Unit
     ) {
@@ -183,6 +188,7 @@ class RokuLazyColumnScope internal constructor() {
                 contentPadding = contentPadding,
                 focusSlot = focusSlot,
                 initialIndex = initialIndex,
+                focusMode = focusMode,
                 header = header,
                 itemCount = scope.itemCount,
                 itemKey = scope.itemKey,

@@ -219,7 +219,7 @@ RokuLazyColumn(state = columnState) { /* rows */ }
 | `columnState.hasFocus` | Observable — true while the column holds platform focus. |
 | `columnState.requestFocus()` | Move platform focus onto the column. Returns `false` if it is not laid out yet. |
 | `rowState.requestFocus()` | Same, for a **standalone** `RokuLazyRow`. Inside a column the column is the focus target — use `columnState.requestFocus()` and `moveToRow`. |
-| `rememberRokuFocusListState(itemCount, initialIndex, focusSlot)` | Per-row selection, also saveable. |
+| `rememberRokuFocusListState(itemCount, initialIndex, focusSlot, focusMode)` | Per-row selection, also saveable. |
 | `rowState.selectedIndex` / `scrollTo(index)` | Read or set the selected item. |
 | `rowState.moveNext()` / `movePrevious()` | Step the selection. Returns `false` at an edge. |
 | `rowState.hasFocus` | True while the row renders as focused (standalone, or the active row of a focused column). |
@@ -379,9 +379,46 @@ border extends outside the card) and `animateScale`.
 
 ---
 
+## Focus modes: Static vs Floating
+
+Each axis chooses how the highlight relates to scrolling, independently:
+
+- **`RokuFocusMode.Static`** (default, and the whole point of the library's name): the highlight
+  stays parked at a fixed slot and the content scrolls behind it on every move — how Roku's home
+  screen behaves.
+- **`RokuFocusMode.Floating`**: the list holds still and the highlight walks across the visible
+  items or rows. It only scrolls when the selection would leave the visible window, and then by
+  the minimum needed to keep it visible — how Android TV's leanback rows behave.
+
+```kotlin
+// Vertical floating (rows hold still, highlight walks down), horizontal static (default):
+RokuLazyColumn(verticalFocusMode = RokuFocusMode.Floating) {
+    row(itemWidth = 220.dp, itemHeight = 140.dp) { /* items */ }              // static rail
+    row(itemWidth = 220.dp, itemHeight = 140.dp,
+        focusMode = RokuFocusMode.Floating) { /* items */ }                   // floating rail
+}
+
+// Standalone row:
+RokuLazyRow(focusMode = RokuFocusMode.Floating) { /* items */ }
+
+// Hoisted state:
+val state = rememberRokuFocusListState(
+    itemCount = movies.size,
+    focusMode = RokuFocusMode.Floating
+)
+```
+
+Pick `Static` when you want the eye to never travel (content does the moving); pick `Floating`
+when you want the scroll position to stay put while the user browses what is already on screen.
+Both modes remember their window across configuration changes and process death, and both apply
+the same edge-overflow correction. `focusSlot` only means something in `Static` — a floating
+window has no fixed slot — so it is ignored in `Floating`.
+
+---
+
 ## Focus Slot
 
-Control where the highlight sits within the visible window:
+In `Static` mode, control where the highlight sits within the visible window:
 
 ```kotlin
 RokuLazyRow(focusSlot = 0) { /* items */ }   // leftmost visible item (default)
@@ -535,6 +572,7 @@ RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 | `RokuColumnState` | Which row is selected; focus control; observable `hasFocus`. |
 | `RokuFocusListState` | Which item of a row is selected. |
 | `RokuFocusConfig` | Navigation behaviour. |
+| `RokuFocusMode` | Per-axis `Static` (fixed slot, content scrolls) vs `Floating` (highlight walks, scrolls at window edges). |
 | `RokuFocusEscape` | Per-edge focus escape. |
 | `RokuHighlightScope` | Receiver of `focusHighlight`: `BoxScope` + `rowIndex`, `itemIndex`. |
 | `RokuNavKey` | `Left` / `Right` / `Enter`, handed to `customRow`'s `onKeyEvent`. |
@@ -580,6 +618,8 @@ keep their 1.x signatures.
 5. The highlight overlay is positioned with `graphicsLayer { translationX/Y }` (GPU-only, no re-layout)
 6. At list edges, overflow correction shifts the highlight to match the actual item position
 7. In `RokuLazyColumn`, one global highlight animates X, Y, width, and height between rows of different card sizes
+8. `RokuFocusMode.Floating` keeps a raw window anchor per axis and only moves it when a selection
+   change would leave the window — same maths, different scroll target
 
 Key-repeat throttling uses `kotlin.time.TimeSource.Monotonic` rather than Android's `SystemClock`,
 which is why no platform-specific source set is needed.

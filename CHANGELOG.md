@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `RokuFocusMode` — per-axis choice between `Static` (Roku-style: the highlight parks at a fixed slot and the content scrolls behind it — the previous behaviour, still the default) and `Floating` (leanback-style: the highlight walks the visible window and the list scrolls only when the selection would leave it, by the minimum needed to keep it visible). Horizontal mode is `focusMode` on `RokuFocusListState` / `rememberRokuFocusListState`, on the DSL `RokuLazyRow` and on `row(...)`; vertical mode is `verticalFocusMode` on both `RokuLazyColumn` overloads. The two axes are independent, so any combination works. `focusSlot` only applies in `Static`. The floating window anchors join both `Saver`s, so a restored screen comes back with the window where it was, not just the selection.
+
 - Repository scaffolding: CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue/PR templates, CI workflow, funding config.
 
 ### Changed

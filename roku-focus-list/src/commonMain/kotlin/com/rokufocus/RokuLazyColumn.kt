@@ -62,8 +62,10 @@ private class FocusedRowRef {
 
 private class ColumnGeometry(
     val rowCumOffsetPx: FloatArray,
+    val rowHeightsPx: FloatArray,
     val maxVerticalScrollPx: Float,
-    val topPaddingPx: Float
+    val topPaddingPx: Float,
+    val viewportHeightPx: Float
 )
 
 /** Cached density conversions for the active row — avoids recomputing 6 toPx() calls per frame. */
@@ -84,6 +86,7 @@ internal fun RokuLazyColumnImpl(
     config: RokuFocusConfig = DefaultRokuFocusConfig,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     rowSpacing: Dp = 24.dp,
+    verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
     focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
     onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
@@ -224,24 +227,52 @@ internal fun RokuLazyColumnImpl(
             val totalContent = topPx + heights.sum() + max(0, metrics.size - 1) * spacingPx + bottomPx
             ColumnGeometry(
                 rowCumOffsetPx = cumOffset,
+                rowHeightsPx = heights,
                 maxVerticalScrollPx = (totalContent - viewportHeightPx).coerceAtLeast(0f),
-                topPaddingPx = topPx
+                topPaddingPx = topPx,
+                viewportHeightPx = viewportHeightPx
             )
         }
 
         // ── Vertical scroll + overflow correction ──
-        val desiredVerticalScrollPx = geometry.rowCumOffsetPx.getOrElse(selectedRowIndex) { 0f }
+        val scrollTargetRow = if (verticalFocusMode == RokuFocusMode.Floating) {
+            // Containment mirrors the horizontal anchor: written back on the writes that move the
+            // selection relative to the window (which composition observes here, the only place
+            // the pixel geometry exists), never derived in a getter — an unstored shift would
+            // flip-flop. Compared against the clamped anchor so a purely data-driven shrink does
+            // not overwrite what the raw value still remembers.
+            val anchor = state.windowAnchorRow.coerceIn(0, rows.lastIndex)
+            val contained = containVerticalWindow(
+                anchorRow = anchor,
+                selectedRow = selectedRowIndex,
+                rowCumOffsetPx = geometry.rowCumOffsetPx,
+                rowHeightsPx = geometry.rowHeightsPx,
+                viewportHeightPx = geometry.viewportHeightPx,
+                topPaddingPx = geometry.topPaddingPx
+            )
+            if (contained != anchor) state.windowAnchorRow = contained
+            contained
+        } else {
+            selectedRowIndex
+        }
+
+        val desiredVerticalScrollPx = geometry.rowCumOffsetPx.getOrElse(scrollTargetRow) { 0f }
         val verticalScrollOverflowPx =
             (desiredVerticalScrollPx - geometry.maxVerticalScrollPx).coerceAtLeast(0f)
 
-        // Keyed on the geometry as well as the selection: scrolling to the last row of a list that
-        // is still loading gets clamped, and once later rows arrive the column would otherwise sit
-        // at that clamped offset while the highlight maths assumed the unclamped one.
-        LaunchedEffect(selectedRowIndex, geometry) {
+        // How far below the window row the selected row sits. Zero in Static, where the scroll
+        // target is the selected row itself.
+        val windowOffsetPx =
+            geometry.rowCumOffsetPx.getOrElse(selectedRowIndex) { 0f } - desiredVerticalScrollPx
+
+        // Keyed on the geometry as well as the scroll target: scrolling to the last row of a list
+        // that is still loading gets clamped, and once later rows arrive the column would
+        // otherwise sit at that clamped offset while the highlight maths assumed the unclamped one.
+        LaunchedEffect(scrollTargetRow, geometry) {
             if (state.keyRepeat.consecutivePresses > config.keyRepeatAccelAfter) {
-                lazyColumnState.scrollToItem(selectedRowIndex)
+                lazyColumnState.scrollToItem(scrollTargetRow)
             } else {
-                lazyColumnState.animateScrollToItem(selectedRowIndex)
+                lazyColumnState.animateScrollToItem(scrollTargetRow)
             }
         }
 
@@ -260,7 +291,8 @@ internal fun RokuLazyColumnImpl(
             }
         }
 
-        val targetHighlightY = geometry.topPaddingPx + verticalScrollOverflowPx + activePx.headerPx
+        val targetHighlightY =
+            geometry.topPaddingPx + windowOffsetPx + verticalScrollOverflowPx + activePx.headerPx
         val targetHighlightX = if (activeRow is RokuResolvedRow.Items) {
             computeHighlightOffsetPx(
                 activeRow.config.state, activePx.itemWidthPx, activePx.itemSpacingPx,
@@ -362,6 +394,40 @@ internal fun RokuLazyColumnImpl(
 
 /** `CollectionInfo` treats a negative count as "unknown", which is right for ragged rails. */
 private const val UnknownColumnCount = -1
+
+/**
+ * Where the vertical floating window must start so the selected row is fully visible, moved
+ * minimally from [anchorRow]. The window is pixel-based, not row-based: rows have heterogeneous
+ * heights and an empty row contributes zero, so "visible" means the selected row's
+ * `[top, top + height]` span fits between the window row's top and the viewport bottom.
+ */
+internal fun containVerticalWindow(
+    anchorRow: Int,
+    selectedRow: Int,
+    rowCumOffsetPx: FloatArray,
+    rowHeightsPx: FloatArray,
+    viewportHeightPx: Float,
+    topPaddingPx: Float
+): Int {
+    if (rowCumOffsetPx.isEmpty()) return 0
+    val anchor = anchorRow.coerceIn(0, rowCumOffsetPx.lastIndex)
+    val selected = selectedRow.coerceIn(0, rowCumOffsetPx.lastIndex)
+    val selectedTop = rowCumOffsetPx[selected]
+    val selectedBottom = selectedTop + rowHeightsPx[selected]
+    val windowHeightPx = viewportHeightPx - topPaddingPx
+    return when {
+        selectedTop < rowCumOffsetPx[anchor] -> selected
+        selectedBottom > rowCumOffsetPx[anchor] + windowHeightPx -> {
+            // Smallest forward shift that fits the selected row's bottom edge. A row taller than
+            // the window degenerates to the selected row itself, top-aligned like Static.
+            var row = anchor
+            while (row < selected && rowCumOffsetPx[row] < selectedBottom - windowHeightPx) row++
+            row
+        }
+
+        else -> anchor
+    }
+}
 
 /** Geometry of a row that renders nothing, so the rows below it are placed where they really are. */
 private val EmptyRowMetrics = RowMetrics(

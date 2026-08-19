@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rokufocus.demo.ui.theme.RokuFocusTheme
@@ -57,6 +58,7 @@ import com.rokufocus.DefaultRokuFocusConfig
 import com.rokufocus.RokuColumnState
 import com.rokufocus.RokuFocusConfig
 import com.rokufocus.RokuFocusEscape
+import com.rokufocus.RokuFocusMode
 import com.rokufocus.RokuLazyColumn
 import com.rokufocus.RokuLazyRow
 import com.rokufocus.RokuNavKey
@@ -86,6 +88,7 @@ private enum class Screen(val label: String, val icon: String) {
     ROW("Row", "R"),
     STATE("State", "S"),
     WRAP("Wrap", "W"),
+    FLOAT("Float", "F"),
     PLAIN("Plain", "P"),
 }
 
@@ -178,6 +181,7 @@ fun StreamFocusDemoScreen() {
                 Screen.ROW     -> RowDslContent()
                 Screen.STATE   -> RowStateContent()
                 Screen.WRAP    -> WrapAroundContent()
+                Screen.FLOAT   -> FloatingFocusContent()
                 Screen.PLAIN   -> PlainContent()
             }
         }
@@ -619,6 +623,64 @@ private fun WrapAroundContent() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 4b. FLOATING FOCUS — the window holds still, the highlight walks it
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun FloatingFocusContent() {
+    val columnState = rememberRokuColumnState()
+    RequestColumnFocusOnAppear(columnState)
+
+    ScreenShell(
+        title = "Floating Focus",
+        subtitle = "verticalFocusMode = Floating · row 1 floats horizontally too · scrolls only at the window edges"
+    ) {
+        RokuLazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = columnState,
+            contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
+            rowSpacing = 16.dp,
+            config = DefaultRokuFocusConfig.copy(
+                focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
+            ),
+            verticalFocusMode = RokuFocusMode.Floating,
+        ) {
+            floatingRows.forEachIndexed { i, rowDef ->
+                row(
+                    itemWidth = rowDef.itemWidth,
+                    itemHeight = rowDef.itemHeight,
+                    itemSpacing = rowDef.itemSpacing,
+                    contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
+                    headerHeight = 30.dp,
+                    key = rowDef.title,
+                    focusMode = if (i == 0) RokuFocusMode.Floating else RokuFocusMode.Static,
+                    header = { isRowFocused ->
+                        RowHeaderText(
+                            rowDef.title + if (i == 0) " (floating row)" else "",
+                            isRowFocused
+                        )
+                    }
+                ) {
+                    items(
+                        items = rowDef.items,
+                        key = { "${rowDef.title}-${it.id}" }
+                    ) { movie, isFocused ->
+                        CardForType(rowDef.cardType, movie, isFocused)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Skips the 310dp banner so several rows share the viewport — that is what makes the
+// held-still window visible.
+private val floatingRows: List<RowDef> = List(12) { i ->
+    val base = baseRows[2 + (i % (baseRows.size - 2))]
+    base.copy(title = "${i + 1}. ${base.title}")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 5. PLAIN — Standard LazyColumn + LazyRow for comparison
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -751,5 +813,13 @@ private fun SidebarItem(
             Spacer(Modifier.height(2.dp))
             Text(text = label, color = fg, fontSize = 9.sp, fontWeight = FontWeight.Medium)
         }
+    }
+}
+
+@Preview(widthDp = 960, heightDp = 540)
+@Composable
+private fun FloatingFocusContentPreview() {
+    RokuFocusTheme(darkTheme = true, dynamicColor = false) {
+        FloatingFocusContent()
     }
 }
