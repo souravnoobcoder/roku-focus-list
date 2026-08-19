@@ -141,6 +141,30 @@ jobs:
           done
           echo "Local publication looks complete."
 
+      # Signing runs here, not only during the upload, so a wrong passphrase or a mangled key
+      # fails on a dry run instead of halfway through a Central deployment.
+      - name: Verify the signing key actually signs
+        env:
+          VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ORG_GRADLE_PROJECT_signingInMemoryKey:-}" ]; then
+            echo "::error::SIGNING_KEY is not set. Central rejects unsigned artifacts."
+            exit 1
+          fi
+          ./gradlew --no-daemon :roku-focus-list:publishToMavenLocal
+          dir="$HOME/.m2/repository/io/github/$OWNER/roku-focus-list/$VERSION"
+          missing=0
+          for f in "roku-focus-list-$VERSION.pom" "roku-focus-list-$VERSION.module" \
+                   "roku-focus-list-$VERSION-sources.jar" "roku-focus-list-$VERSION-javadoc.jar"; do
+            [ -f "$dir/$f.asc" ] || { echo "::error::No signature for $f"; missing=1; }
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "Every required artifact is signed."
+
       # Written to a file rather than a step output: changelog entries are full of backticks, and
       # interpolating them into a shell command would run them.
       - name: Collect the changelog entry
