@@ -1,6 +1,6 @@
 # roku-focus-list
 
-[![](https://jitpack.io/v/souravnoobcoder/roku-focus-list.svg)](https://jitpack.io/#souravnoobcoder/roku-focus-list)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.souravnoobcoder/roku-focus-list.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/io.github.souravnoobcoder/roku-focus-list)
 
 Kotlin Multiplatform / Compose Multiplatform library providing Roku-style fixed-focus navigation.
 The focus highlight stays at a fixed screen position while content scrolls behind it — both
@@ -35,7 +35,7 @@ From a Kotlin Multiplatform project:
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("com.github.souravnoobcoder:roku-focus-list:2.0.0")
+            implementation("io.github.souravnoobcoder:roku-focus-list:2.0.0")
         }
     }
 }
@@ -45,7 +45,7 @@ From an Android-only Jetpack Compose project:
 
 ```kotlin
 dependencies {
-    implementation("com.github.souravnoobcoder:roku-focus-list:2.0.0")
+    implementation("io.github.souravnoobcoder:roku-focus-list:2.0.0")
 }
 ```
 

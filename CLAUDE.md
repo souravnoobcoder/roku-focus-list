@@ -115,10 +115,12 @@ Wrap-Around, Plain Compose comparison). Images from `picsum.photos`. Screens are
 
 ## Publishing
 
-- Group `com.github.souravnoobcoder`, artifact `roku-focus-list`, version `2.0.0`. Group must match the GitHub owner for JitPack to resolve.
+- Group `io.github.souravnoobcoder`, artifact `roku-focus-list`, version `2.0.0`, published to Maven Central via the Sonatype Central Portal (`com.vanniktech.maven.publish`).
+- **JitPack cannot serve this library.** Six KMP publications trip its multi-module handling: it re-groups everything under `com.github.owner.repo` and rewrites the metadata, after which a `commonMain` dependency fails on `Could not find roku-focus-list-iosarm64-<v>.jar`. Verified against the real 2.0.0 tag it built. Do not go back.
 - KMP `maven-publish` creates 6 publications: `kotlinMultiplatform` (root, carries the commonMain metadata variant and redirects), `android`, `desktop`, `iosArm64`, `iosSimulatorArm64`, `iosX64`.
 - Consumers only ever reference the root coordinate.
 - `consumer-rules.pro` is published inside the AAR as `proguard.txt` via `optimization { consumerKeepRules.apply { publish = true; file(...) } }`.
+- Signing is applied only when `signingInMemoryKey` is present, so `publishToMavenLocal` works without a GPG key. The release workflow refuses to upload unsigned.
 
 ## Known issues / future work
 
