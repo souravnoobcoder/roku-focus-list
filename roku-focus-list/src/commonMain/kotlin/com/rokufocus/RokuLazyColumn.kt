@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -314,21 +316,19 @@ internal fun RokuLazyColumnImpl(
         val animatedWidth by animateFloatAsState(targetHighlightWidth, HighlightSizeSpec, label = "hl_w")
         val animatedHeight by animateFloatAsState(activePx.contentHeightPx, HighlightSizeSpec, label = "hl_h")
 
-        // ── Render ──
-        Box(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                state = lazyColumnState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = contentPadding,
-                verticalArrangement = Arrangement.spacedBy(rowSpacing),
-                userScrollEnabled = false
-            ) {
-                items(
-                    count = rows.size,
-                    key = rowKeys
-                ) { rowIndex ->
+        // The row content is remembered so LazyColumn receives the same lambda instance on every
+        // selection recomposition — `rows` is a List (unstable), so without this the compiler
+        // recreates the lambda per pass and every visible row (and, through the replaced inner
+        // lambdas, every visible card wrapper) recomposes on every key press. Selection is read
+        // back inside each item's own scope via derivedStateOf, so a move recomposes exactly the
+        // rows and items whose focus actually flipped.
+        val rowItemContent: (@Composable LazyItemScope.(Int) -> Unit) =
+            remember(rows, state, rowHeader, itemContent) {
+                { rowIndex ->
                     val row = rows[rowIndex]
-                    val isRowFocused = state.hasFocus && rowIndex == selectedRowIndex
+                    val isRowFocused by remember {
+                        derivedStateOf { state.hasFocus && rowIndex == state.selectedRowIndex }
+                    }
 
                     Column(modifier = Modifier.fillMaxWidth()) {
                         if (row.isSelectable) {
@@ -349,8 +349,9 @@ internal fun RokuLazyColumnImpl(
                                 rowIndex = rowIndex,
                                 itemKey = row.itemKey,
                                 itemContentDescription = row.config.itemContentDescription,
+                                rowFocused = { state.hasFocus && rowIndex == state.selectedRowIndex },
                                 itemContent = { itemIndex, isFocused ->
-                                    itemContent(rowIndex, itemIndex, isFocused && isRowFocused)
+                                    itemContent(rowIndex, itemIndex, isFocused)
                                 }
                             )
 
@@ -364,6 +365,22 @@ internal fun RokuLazyColumnImpl(
                         }
                     }
                 }
+            }
+
+        // ── Render ──
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = lazyColumnState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = contentPadding,
+                verticalArrangement = Arrangement.spacedBy(rowSpacing),
+                userScrollEnabled = false
+            ) {
+                items(
+                    count = rows.size,
+                    key = rowKeys,
+                    itemContent = rowItemContent
+                )
             }
 
             // Single global highlight overlay

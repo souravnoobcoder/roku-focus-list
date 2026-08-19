@@ -2,10 +2,12 @@ package com.rokufocus
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -13,7 +15,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
+import androidx.compose.ui.unit.isUnspecified
+import androidx.compose.ui.unit.takeOrElse
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // roku-focus-list — Public API
@@ -191,8 +197,10 @@ fun RokuLazyRow(
 /**
  * OTT-style vertical + horizontal navigation with **DSL row builder**.
  *
- * Each [row][RokuLazyColumnScope.row] declares its own card dimensions, header, and items, and
- * [customRow][RokuLazyColumnScope.customRow] drops in anything that is not a rail of equal cards.
+ * Each [row][RokuLazyColumnScope.row] declares its own card dimensions, header, and items — or
+ * omits the dimensions and lets the column measure them from the first item, so any composable
+ * fits without size bookkeeping. [customRow][RokuLazyColumnScope.customRow] drops in anything
+ * that is not a rail of equal cards.
  * Per-row selection state is managed internally; the column's own selection is hoistable through
  * [state].
  *
@@ -254,10 +262,17 @@ fun RokuLazyColumn(
     // positional fallback of a neighbouring row.
     val allKeyed = scope.rows.isNotEmpty() && scope.rows.all { it.key != null }
 
+    // Sizes measured for rows that omitted them, keyed the same way row state is, so a measured
+    // size follows its row across insertions and reorders. Measured once per row and kept: the
+    // first item's size is the row's size, exactly as in the auto-measured [RokuLazyRow].
+    val measuredItemSizes = remember { mutableStateMapOf<Any, DpSize>() }
+    val measuredHeaderHeights = remember { mutableStateMapOf<Any, Dp>() }
+
     val resolvedRows = scope.rows.mapIndexed { index, spec ->
         when (spec) {
             is RokuLazyColumnScope.RowSpec.Items -> {
-                val rowState = key(if (allKeyed) spec.key!! else index) {
+                val rowId: Any = if (allKeyed) spec.key!! else index
+                val rowState = key(rowId) {
                     rememberRokuFocusListState(
                         itemCount = spec.itemCount,
                         initialIndex = spec.initialIndex,
@@ -265,20 +280,30 @@ fun RokuLazyColumn(
                         focusMode = spec.focusMode
                     )
                 }
+                val measured = measuredItemSizes[rowId]
+                val itemWidth = spec.itemWidth.takeOrElse { measured?.width ?: Dp.Unspecified }
+                val itemHeight = spec.itemHeight.takeOrElse { measured?.height ?: Dp.Unspecified }
+                val headerHeight = when {
+                    spec.headerHeight.isSpecified -> spec.headerHeight
+                    spec.header == null -> 0.dp
+                    else -> measuredHeaderHeights[rowId] ?: Dp.Unspecified
+                }
                 RokuResolvedRow.Items(
                     key = spec.key,
                     header = spec.header,
                     config = RokuColumnRowConfig(
                         state = rowState,
-                        itemWidth = spec.itemWidth,
-                        itemHeight = spec.itemHeight,
+                        itemWidth = itemWidth.takeOrElse { 0.dp },
+                        itemHeight = itemHeight.takeOrElse { 0.dp },
                         itemSpacing = spec.itemSpacing,
                         contentPadding = spec.contentPadding,
-                        headerHeight = spec.headerHeight,
+                        headerHeight = headerHeight.takeOrElse { 0.dp },
                         key = spec.key,
                         itemContentDescription = spec.itemContentDescription
                     ),
-                    itemKey = spec.itemKey
+                    itemKey = spec.itemKey,
+                    awaitingMeasure = spec.itemCount > 0 &&
+                        (itemWidth.isUnspecified || itemHeight.isUnspecified || headerHeight.isUnspecified)
                 )
             }
 
@@ -294,25 +319,95 @@ fun RokuLazyColumn(
         }
     }
 
-    RokuLazyColumnImpl(
-        rows = resolvedRows,
-        state = state,
-        modifier = modifier,
-        config = config,
-        contentPadding = contentPadding,
-        rowSpacing = rowSpacing,
-        verticalFocusMode = verticalFocusMode,
-        focusHighlight = focusHighlight,
-        onItemSelected = onItemSelected,
-        onItemClicked = onItemClicked,
-        onFocusEnter = onFocusEnter,
-        onFocusExit = onFocusExit,
-        rowHeader = null,
-        itemContent = { rowIndex, itemIndex, isFocused ->
-            val spec = scope.rows.getOrNull(rowIndex)
-            if (spec is RokuLazyColumnScope.RowSpec.Items) spec.itemContent(itemIndex, isFocused)
+    RokuColumnAutoMeasure(
+        rows = scope.rows,
+        allKeyed = allKeyed,
+        measuredItemSizes = measuredItemSizes,
+        measuredHeaderHeights = measuredHeaderHeights,
+        modifier = modifier
+    ) {
+        RokuLazyColumnImpl(
+            rows = resolvedRows,
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+            config = config,
+            contentPadding = contentPadding,
+            rowSpacing = rowSpacing,
+            verticalFocusMode = verticalFocusMode,
+            focusHighlight = focusHighlight,
+            onItemSelected = onItemSelected,
+            onItemClicked = onItemClicked,
+            onFocusEnter = onFocusEnter,
+            onFocusExit = onFocusExit,
+            rowHeader = null,
+            itemContent = { rowIndex, itemIndex, isFocused ->
+                val spec = scope.rows.getOrNull(rowIndex)
+                if (spec is RokuLazyColumnScope.RowSpec.Items) spec.itemContent(itemIndex, isFocused)
+            }
+        )
+    }
+}
+
+/**
+ * Hosts the column plus one invisible measurer per auto-sized row that has not reported yet.
+ * Structurally constant — always this Box, whether anything needs measuring or not — because
+ * swapping the tree's shape would discard the remembered row states inside the column.
+ */
+@Composable
+private fun RokuColumnAutoMeasure(
+    rows: List<RokuLazyColumnScope.RowSpec>,
+    allKeyed: Boolean,
+    measuredItemSizes: MutableMap<Any, DpSize>,
+    measuredHeaderHeights: MutableMap<Any, Dp>,
+    modifier: Modifier,
+    column: @Composable () -> Unit
+) {
+    val density = LocalDensity.current
+    Box(modifier = modifier) {
+        rows.forEachIndexed { index, spec ->
+            if (spec !is RokuLazyColumnScope.RowSpec.Items) return@forEachIndexed
+            val rowId: Any = if (allKeyed) spec.key!! else index
+
+            val needsItemMeasure = spec.itemCount > 0 &&
+                (spec.itemWidth.isUnspecified || spec.itemHeight.isUnspecified) &&
+                measuredItemSizes[rowId] == null
+            if (needsItemMeasure) {
+                key(rowId) {
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer { alpha = 0f }
+                            .onSizeChanged { size ->
+                                measuredItemSizes[rowId] = with(density) {
+                                    DpSize(size.width.toDp(), size.height.toDp())
+                                }
+                            }
+                    ) {
+                        spec.itemContent(0, false)
+                    }
+                }
+            }
+
+            val header = spec.header
+            val needsHeaderMeasure = header != null &&
+                spec.headerHeight.isUnspecified &&
+                measuredHeaderHeights[rowId] == null
+            if (needsHeaderMeasure) {
+                key(rowId, "header") {
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer { alpha = 0f }
+                            .onSizeChanged { size ->
+                                measuredHeaderHeights[rowId] = with(density) { size.height.toDp() }
+                            }
+                    ) {
+                        header(false)
+                    }
+                }
+            }
         }
-    )
+
+        column()
+    }
 }
 
 // ─── RokuLazyColumn (State-based) ────────────────────────────────────────────

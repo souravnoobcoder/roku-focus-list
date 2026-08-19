@@ -379,6 +379,30 @@ border extends outside the card) and `animateScale`.
 
 ---
 
+## Row sizing: explicit or auto-measured
+
+Rows in the `RokuLazyColumn` DSL don't need dimensions — omit them and the column measures the
+first item (and the header) by composing it invisibly once, the same way the DSL `RokuLazyRow`
+auto-measures its item width:
+
+```kotlin
+RokuLazyColumn {
+    row(key = "trending", header = { Text("Trending") }) {
+        items(movies) { movie, isFocused -> MovieCard(movie, isFocused) }   // sized from the card
+    }
+    row(itemWidth = 150.dp, itemHeight = 150.dp, key = "avatars") {         // explicit override
+        items(profiles) { p, isFocused -> Avatar(p, isFocused) }
+    }
+}
+```
+
+Any composable fits without size bookkeeping; all items in a row share the first item's size.
+Pass explicit sizes when you want the highlight bounds to differ from the card's measured bounds,
+or to skip the measuring pass on screens with very many rows. The state-based `RokuLazyColumn`
+overload stays fully explicit, and `customRow` always takes its `height` up front.
+
+---
+
 ## Focus modes: Static vs Floating
 
 Each axis chooses how the highlight relates to scrolling, independently:
@@ -560,7 +584,7 @@ RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 |---|---|
 | `RokuLazyRow` | Horizontal fixed-focus row. DSL variant auto-measures width; state variant takes explicit `itemWidth`. |
 | `RokuLazyColumn` | Vertical + horizontal OTT grid. DSL variant manages per-row state internally; state variant takes `List<RokuColumnRowConfig>`. |
-| `RokuLazyColumnScope.row` | A rail of equal-size cards. |
+| `RokuLazyColumnScope.row` | A rail of equal-size cards. Sizes explicit, or measured from the first item when omitted. |
 | `RokuLazyColumnScope.customRow` | Anything else, with LEFT/RIGHT/ENTER delegated to it. |
 | `DefaultFocusHighlight` | Default white rounded-border highlight. `BoxScope` extension, fully replaceable. |
 | `Modifier.rokuKeyHandler` | Low-level D-pad handler, for wiring your own container. |

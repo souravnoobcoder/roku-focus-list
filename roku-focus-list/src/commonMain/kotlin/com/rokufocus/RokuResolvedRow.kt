@@ -48,11 +48,19 @@ internal sealed class RokuResolvedRow {
         override val key: Any?,
         override val header: (@Composable (isRowFocused: Boolean) -> Unit)?,
         val config: RokuColumnRowConfig,
-        val itemKey: ((index: Int) -> Any)? = null
+        val itemKey: ((index: Int) -> Any)? = null,
+        /**
+         * True while an auto-sized row's first item or header has not reported its size yet.
+         * Such a row behaves exactly like an empty one — skipped by UP/DOWN, zero geometry,
+         * renders nothing — so the column never scrolls or highlights against made-up sizes.
+         * Measurement lands within a frame and the row appears through the same machinery that
+         * handles late-arriving rows.
+         */
+        val awaitingMeasure: Boolean = false
     ) : RokuResolvedRow() {
         override val headerHeight: Dp get() = config.headerHeight
         override val contentHeight: Dp get() = config.itemHeight
-        override val isSelectable: Boolean get() = config.state.itemCount > 0
+        override val isSelectable: Boolean get() = config.state.itemCount > 0 && !awaitingMeasure
         override val showHighlight: Boolean get() = true
     }
 

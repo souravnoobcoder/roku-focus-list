@@ -78,6 +78,7 @@ class RokuFocusListState(
     var visibleCount: Int
         get() = _visibleCount
         internal set(value) {
+            if (_visibleCount == value) return
             _visibleCount = value
             containWindow()
         }
@@ -133,7 +134,9 @@ class RokuFocusListState(
      * grows to include it.
      */
     fun updateItemCount(newCount: Int) {
-        _itemCount = newCount.coerceAtLeast(0)
+        val coerced = newCount.coerceAtLeast(0)
+        if (_itemCount == coerced) return
+        _itemCount = coerced
         containWindow()
     }
 
@@ -145,6 +148,10 @@ class RokuFocusListState(
      * that is never stored flip-flops, snapping back to the stale anchor on the next in-window
      * move. Comparing against the clamped [windowStart] rather than the raw anchor keeps a purely
      * data-driven shrink from overwriting the anchor the raw value still remembers.
+     *
+     * The callers guard on value equality first: [updateItemCount] and the [visibleCount] setter
+     * run from composition on every pass, and the selection reads here would otherwise subscribe
+     * that composition scope to every future selection change.
      */
     private fun containWindow() {
         if (focusMode != RokuFocusMode.Floating) return

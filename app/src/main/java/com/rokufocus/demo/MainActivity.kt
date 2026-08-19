@@ -252,7 +252,7 @@ private fun MixedRowsContent() {
 
     ScreenShell(
         title = "Mixed rows",
-        subtitle = "customRow hero + chip strip between rails · circular highlight on avatars · empty rail is skipped"
+        subtitle = "customRow hero + chips · rails auto-measure their card sizes · circular highlight on avatars · empty rail is skipped"
     ) {
         RokuLazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -301,11 +301,10 @@ private fun MixedRowsContent() {
                 GenreChips(selected = genre, isRowFocused = isRowFocused)
             }
 
+            // No itemWidth/itemHeight/headerHeight: the column measures them from the first
+            // card and the header, so any composable fits without size bookkeeping.
             row(
-                itemWidth = 220.dp,
-                itemHeight = 140.dp,
                 contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
-                headerHeight = 30.dp,
                 key = "trending",
                 header = { isRowFocused -> RowHeaderText("Trending Now", isRowFocused) }
             ) {
@@ -314,6 +313,8 @@ private fun MixedRowsContent() {
                 }
             }
 
+            // Explicit sizes here override auto-measure: the circular highlight is designed
+            // around the avatar image, not the card's full measured bounds (image + label).
             row(
                 itemWidth = 150.dp,
                 itemHeight = 150.dp,
@@ -328,11 +329,9 @@ private fun MixedRowsContent() {
             }
 
             // Declared but empty: up/down steps straight over it and it takes up no height.
+            // Also auto-sized — an empty row measures nothing until items arrive.
             row(
-                itemWidth = 220.dp,
-                itemHeight = 140.dp,
                 contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
-                headerHeight = 30.dp,
                 key = "continue-watching",
                 header = { isRowFocused -> RowHeaderText("Continue Watching (empty)", isRowFocused) }
             ) {
@@ -342,10 +341,7 @@ private fun MixedRowsContent() {
             }
 
             row(
-                itemWidth = 150.dp,
-                itemHeight = 220.dp,
                 contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
-                headerHeight = 30.dp,
                 key = "new-releases",
                 header = { isRowFocused -> RowHeaderText("New Releases", isRowFocused) }
             ) {
@@ -821,5 +817,13 @@ private fun SidebarItem(
 private fun FloatingFocusContentPreview() {
     RokuFocusTheme(darkTheme = true, dynamicColor = false) {
         FloatingFocusContent()
+    }
+}
+
+@Preview(widthDp = 960, heightDp = 540)
+@Composable
+private fun MixedRowsContentPreview() {
+    RokuFocusTheme(darkTheme = true, dynamicColor = false) {
+        MixedRowsContent()
     }
 }

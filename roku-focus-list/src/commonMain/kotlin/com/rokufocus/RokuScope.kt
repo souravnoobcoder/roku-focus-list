@@ -144,11 +144,19 @@ class RokuLazyColumnScope internal constructor() {
     /**
      * Declare a horizontal row with fixed-size items.
      *
-     * @param itemWidth Width of each card in this row.
-     * @param itemHeight Height of each card (used for highlight sizing).
+     * Sizing is optional: leave [itemWidth] / [itemHeight] / [headerHeight] out and the column
+     * measures them from the first item (and the header) by composing it invisibly once, the same
+     * way the DSL [RokuLazyRow] auto-measures. Items still share one size — the first item's.
+     * Passing explicit sizes skips that measuring pass, which is worth doing on screens with very
+     * many rows.
+     *
+     * @param itemWidth Width of each card in this row. Omit to measure it from the first item.
+     * @param itemHeight Height of each card (used for highlight sizing). Omit to measure it from
+     *   the first item.
      * @param itemSpacing Horizontal gap between cards.
      * @param contentPadding Horizontal padding around the row content.
-     * @param headerHeight Height of the [header] composable. Must match actual rendered height.
+     * @param headerHeight Height of the [header] composable. Omit to measure the header; an
+     *   explicit value must match the actual rendered height.
      * @param focusSlot Which visible slot the highlight sits at (0 = leftmost). Ignored in
      *   [RokuFocusMode.Floating].
      * @param initialIndex Item selected the first time this row's state is created. It is
@@ -165,11 +173,11 @@ class RokuLazyColumnScope internal constructor() {
      * @param content Item declarations via [RokuItemScope.items].
      */
     fun row(
-        itemWidth: Dp,
-        itemHeight: Dp,
+        itemWidth: Dp = Dp.Unspecified,
+        itemHeight: Dp = Dp.Unspecified,
         itemSpacing: Dp = 14.dp,
         contentPadding: PaddingValues = PaddingValues(0.dp),
-        headerHeight: Dp = 0.dp,
+        headerHeight: Dp = Dp.Unspecified,
         focusSlot: Int = 0,
         initialIndex: Int = 0,
         key: Any? = null,
