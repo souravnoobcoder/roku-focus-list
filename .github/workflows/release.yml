@@ -9,7 +9,7 @@ name: Release
 #   MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD  — a user token from central.sonatype.com
 #   SIGNING_KEY                                      — ascii-armoured GPG private key
 #   SIGNING_KEY_PASSWORD                             — its passphrase
-# The deployment is staged, not released: approve it in the Portal once it validates.
+# The deployment is published automatically, then verified by resolving it back off Central.
 on:
   workflow_dispatch:
     inputs:
@@ -37,7 +37,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v7
@@ -200,10 +200,10 @@ jobs:
           echo "--- release notes ---"
           cat release-notes.md
 
-      # Uploaded before the tag exists, so a rejected deployment leaves no tag behind. Central is
-      # immutable once released, which is why automaticRelease is off: this stages a deployment
-      # for approval in the Portal rather than publishing irrevocably from CI.
-      - name: Stage the deployment on Maven Central
+      # Uploaded before the tag exists, so a rejected deployment leaves no tag behind. The plugin
+      # polls the deployment and fails the build if Central rejects it, so a validation error
+      # surfaces here rather than sitting unnoticed in the Portal.
+      - name: Publish to Maven Central
         if: ${{ !inputs.dry_run }}
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
@@ -221,8 +221,12 @@ jobs:
             echo "::error::Signing is not optional on Central; refusing to publish unsigned."
             exit 1
           fi
-          ./gradlew --no-daemon :roku-focus-list:publishToMavenCentral
-          echo "Staged. Approve it at https://central.sonatype.com/publishing/deployments"
+          # publishAndReleaseToMavenCentral, not publishToMavenCentral: the build's
+          # automaticRelease is false so that publishing is a decision made here, in CI, and not
+          # something a local invocation can trigger by accident.
+          ./gradlew --no-daemon :roku-focus-list:publishAndReleaseToMavenCentral
+          echo "Published to Central."
+
 
       - name: Tag and publish the GitHub release
         if: ${{ !inputs.dry_run }}
@@ -245,6 +249,45 @@ jobs:
           fi
           gh release create "$VERSION" "${args[@]}"
 
+      # Without a human approving the deployment, nothing else confirms the release is usable.
+      # A green publish is not the same as a resolvable artifact: JitPack served this library with
+      # a successful build and metadata no Gradle consumer could resolve. So resolve it back.
+      - name: Verify the release resolves off Maven Central
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          base="https://repo1.maven.org/maven2/io/github/$OWNER/roku-focus-list/$VERSION"
+
+          echo "Waiting for Central to serve $VERSION..."
+          served=false
+          for attempt in $(seq 1 60); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+              "$base/roku-focus-list-$VERSION.module" || echo 000)
+            if [ "$code" = "200" ]; then served=true; break; fi
+            sleep 30
+          done
+
+          if [ "$served" != "true" ]; then
+            echo "::warning::Central has not served $VERSION within 30 minutes."
+            echo "::warning::Propagation can lag; check $base/ before assuming it is broken."
+            exit 0
+          fi
+
+          # mavenLocal must go. This job published locally minutes ago, so leaving it in place
+          # would resolve from disk and pass without telling us anything about Central.
+          sed -i '/mavenLocal()/d' verification/published-consumer/settings.gradle.kts
+          rm -rf "$HOME/.m2/repository/io/github/$OWNER"
+          sed -i "s|^val rokuFocusList = .*|val rokuFocusList = \"io.github.$OWNER:roku-focus-list:$VERSION\"|" \
+            verification/published-consumer/build.gradle.kts
+
+          ./gradlew --no-daemon -p verification/published-consumer \
+            --refresh-dependencies verifyCommonMainConsumption printRokuFocusResolution
+
+          echo "$VERSION resolves from Central in commonMain and per target."
+
       - name: Summary
         if: always()
         env:
@@ -261,9 +304,9 @@ jobs:
             else
               echo "- Tag: \`$VERSION\` on \`$GITHUB_SHA\`"
               echo "- Release: https://github.com/$REPO/releases/tag/$VERSION"
-              echo "- **Approve the deployment:** https://central.sonatype.com/publishing/deployments"
+              echo "- Maven Central: https://central.sonatype.com/artifact/io.github.$OWNER/roku-focus-list/$VERSION"
               echo
-              echo "It is staged, not live. Nothing resolves until you publish it in the Portal."
+              echo "Published and resolved back off Central. No manual step required."
             fi
             echo
             echo '```kotlin'
