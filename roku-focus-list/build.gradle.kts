@@ -21,7 +21,7 @@ kotlin {
     android {
         namespace = "com.rokufocus"
         compileSdk = 36
-        minSdk = 24
+        minSdk = 23
 
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)

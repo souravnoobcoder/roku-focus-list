@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### BREAKING
 
+## [2.0.1] - 2026-08-19
+
+### Changed
+
+- Android `minSdk` lowered from 24 to 23. The library is pure Compose Multiplatform — no `androidMain` source set, no `android.*` API usage — so the 24 floor was a build setting, not a real requirement, and it forced consumers shipping minSdk 23 into `tools:overrideLibrary`.
+
+### Fixed
+
+- The selected item is now drawn above its siblings (`zIndex`) inside `RokuLazyRow` / `RokuLazyColumn` rows. Consumers that scale the selected card or decorate it beyond its bounds saw the next item's leading edge drawn over it, because LazyRow paints items in placement order.
+
 ## [2.0.0] - 2026-08-18
 
 ### Added

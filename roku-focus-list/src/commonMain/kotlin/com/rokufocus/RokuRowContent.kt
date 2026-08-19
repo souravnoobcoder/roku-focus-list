@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.CollectionItemInfo
 import androidx.compose.ui.semantics.collectionItemInfo
 import androidx.compose.ui.semantics.contentDescription
@@ -60,6 +61,10 @@ internal fun RokuRowContent(
             Box(
                 modifier = Modifier
                     .width(itemWidth)
+                    // The selected card is the one consumers scale up or decorate
+                    // beyond its bounds; without lifting it, LazyRow's placement
+                    // order draws the NEXT sibling over its trailing edge.
+                    .zIndex(if (isSelected) 1f else 0f)
                     // Unmerged on purpose: merging here was measured on an API 31 TV emulator to
                     // drop this node's own contentDescription without actually absorbing the
                     // card's children, leaving a worse tree than not merging at all.
