@@ -66,9 +66,15 @@ jobs:
             exit 1
           fi
 
+          # A dry run tags nothing, so an existing tag must not stop it — otherwise the one mode
+          # meant for validating a release cannot validate an already-tagged one.
           if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
-            echo "::error::Tag $VERSION already exists. Releases are immutable; pick a new version."
-            exit 1
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "::warning::Tag $VERSION already exists; a real run would refuse."
+            else
+              echo "::error::Tag $VERSION already exists. Releases are immutable; pick a new version."
+              exit 1
+            fi
           fi
 
           case "$REF_NAME" in
