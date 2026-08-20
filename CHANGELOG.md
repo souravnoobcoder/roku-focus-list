@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-20
+
 ### Changed
 
 - `row(...)`'s `headerHeight` default changed from `0.dp` to auto-measure. A 2.0 caller passing a `header` without `headerHeight` used to get a highlight Y computed against a zero-height header (visibly misaligned); the header is now measured and the highlight lands below it. Callers that passed an explicit `headerHeight` are unaffected.
@@ -27,17 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Repository scaffolding: CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue/PR templates, CI workflow, funding config.
 
-### Changed
-
-### Deprecated
-
-### Removed
-
 ### Fixed
 
-### Security
-
-### BREAKING
+- Enter / D-pad center on a column with nothing selectable (every row empty or still loading) no longer reports a phantom `onItemClicked` for a row that cannot be interacted with. The press is left unconsumed, mirroring how the directional keys fall through to focus escape at the same dead end.
 
 ## [2.0.1] - 2026-08-19
 
