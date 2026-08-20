@@ -1,0 +1,32 @@
+name: CI
+
+# Every PR proves the library still works where it is developed (desktop JVM: unit tests plus
+# headless Compose UI tests) and still compiles for iOS. macOS runner because the iOS compile
+# needs one anyway, so a single job covers both.
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Desktop tests and iOS compile
+        run: ./gradlew :roku-focus-list:desktopTest :roku-focus-list:compileKotlinIosSimulatorArm64
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-reports
+          path: roku-focus-list/build/reports/tests/
