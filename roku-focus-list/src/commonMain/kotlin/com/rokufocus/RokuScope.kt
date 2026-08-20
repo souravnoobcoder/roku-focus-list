@@ -147,8 +147,12 @@ class RokuLazyColumnScope internal constructor() {
      * Sizing is optional: leave [itemWidth] / [itemHeight] / [headerHeight] out and the column
      * measures them from the first item (and the header) by composing it invisibly once, the same
      * way the DSL [RokuLazyRow] auto-measures. Items still share one size — the first item's.
-     * Passing explicit sizes skips that measuring pass, which is worth doing on screens with very
-     * many rows.
+     * The first **non-zero** measured size wins and is kept; until one lands (an async image with
+     * no placeholder dimensions reports 0x0 on first layout) the row behaves like an empty row.
+     * Items whose first layout never has intrinsic size need explicit dimensions. A header's
+     * first reading is final even when zero — a zero-height header is legitimate. Passing
+     * explicit sizes skips the measuring pass, which is worth doing on screens with very many
+     * rows.
      *
      * @param itemWidth Width of each card in this row. Omit to measure it from the first item.
      * @param itemHeight Height of each card (used for highlight sizing). Omit to measure it from

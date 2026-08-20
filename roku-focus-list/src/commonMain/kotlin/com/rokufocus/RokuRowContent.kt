@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.collectLatest
@@ -49,6 +50,12 @@ internal fun RokuRowContent(
 ) {
     if (state.itemCount == 0) return
 
+    // The freshest rowFocused, readable from inside the long-lived per-item deriveds below. When
+    // a keyed move hands this composable a new lambda (its row shifted position in the column),
+    // the deriveds observe the swap through this State — the instance they captured on first
+    // composition would keep answering for the row's original position.
+    val currentRowFocused = rememberUpdatedState(rowFocused)
+
     val lazyListState = rememberLazyListState()
 
     // Scroll when the visible window shifts. Collected from a snapshotFlow rather than read in
@@ -73,10 +80,12 @@ internal fun RokuRowContent(
             key = itemKey ?: { it }
         ) { index ->
             // Derived per item: a selection change recomposes the two items whose value flipped,
-            // not every visible item that happens to read selectedIndex.
-            val isSelected by remember { derivedStateOf { index == state.selectedIndex } }
-            val showAsFocused by remember {
-                derivedStateOf { index == state.selectedIndex && rowFocused() }
+            // not every visible item that happens to read selectedIndex. Keyed on index because a
+            // keyed item that moves position keeps its composition — a keyless remember would go
+            // on comparing against the position the item was born at.
+            val isSelected by remember(index) { derivedStateOf { index == state.selectedIndex } }
+            val showAsFocused by remember(index) {
+                derivedStateOf { index == state.selectedIndex && currentRowFocused.value() }
             }
             Box(
                 modifier = Modifier

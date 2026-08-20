@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `row(...)`'s `headerHeight` default changed from `0.dp` to auto-measure. A 2.0 caller passing a `header` without `headerHeight` used to get a highlight Y computed against a zero-height header (visibly misaligned); the header is now measured and the highlight lands below it. Callers that passed an explicit `headerHeight` are unaffected.
+
 - A key press no longer does O(rows) work in the column: all per-row pixel geometry is precomputed into arrays inside a `derivedStateOf` whose only observable inputs are the rows' item counts, and the per-rail `visibleCount` sync is keyed on the rows and viewport. Navigation now reads cached arrays and allocates nothing — previously every press rebuilt and value-compared a metrics list across all rows (100 allocations per press on a 100-row screen).
 
 - A D-pad move now recomposes only the rows and items whose focus actually changed, instead of every visible row and card wrapper. The column's row content is one remembered lambda (the row list is unstable, so the compiler was recreating it every pass and invalidating everything under it), selection is read per item through `derivedStateOf`, and the row scroll follows `windowStart` through a `snapshotFlow` instead of a composition read. Measured on a TV emulator: five horizontal presses went from 78 item-wrapper and 15 row recompositions to 14 and 0. Cards with unstable parameters — which cannot self-skip — stop re-running wholesale on every press.

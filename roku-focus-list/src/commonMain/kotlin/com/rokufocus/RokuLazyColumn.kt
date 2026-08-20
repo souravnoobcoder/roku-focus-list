@@ -325,7 +325,9 @@ internal fun RokuLazyColumnImpl(
             remember(rows, state, rowHeader, itemContent) {
                 { rowIndex ->
                     val row = rows[rowIndex]
-                    val isRowFocused by remember {
+                    // Keyed on rowIndex: a keyed row that shifts position keeps its composition,
+                    // and a keyless remember would keep comparing against the old position.
+                    val isRowFocused by remember(rowIndex) {
                         derivedStateOf { state.hasFocus && rowIndex == state.selectedRowIndex }
                     }
 

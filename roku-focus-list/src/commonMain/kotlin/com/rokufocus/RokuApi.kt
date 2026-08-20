@@ -377,8 +377,15 @@ private fun RokuColumnAutoMeasure(
                         modifier = Modifier
                             .graphicsLayer { alpha = 0f }
                             .onSizeChanged { size ->
-                                measuredItemSizes[rowId] = with(density) {
-                                    DpSize(size.width.toDp(), size.height.toDp())
+                                // A zero reading never finalizes item measurement: the common
+                                // async-image card has no intrinsic size on first layout, and
+                                // recording 0x0 would make the row selectable with zero-width
+                                // items forever. The measurer stays composed until a real size
+                                // lands; the first non-zero size wins.
+                                if (size.width > 0 && size.height > 0) {
+                                    measuredItemSizes[rowId] = with(density) {
+                                        DpSize(size.width.toDp(), size.height.toDp())
+                                    }
                                 }
                             }
                     ) {
@@ -397,6 +404,9 @@ private fun RokuColumnAutoMeasure(
                         modifier = Modifier
                             .graphicsLayer { alpha = 0f }
                             .onSizeChanged { size ->
+                                // Unlike items, a header may legitimately measure zero, so the
+                                // first reading — zero included — is final. A header whose real
+                                // height arrives late needs an explicit headerHeight.
                                 measuredHeaderHeights[rowId] = with(density) { size.height.toDp() }
                             }
                     ) {

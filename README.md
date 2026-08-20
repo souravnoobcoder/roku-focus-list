@@ -256,6 +256,12 @@ grows a row.
 
 ## Row identity (`key`)
 
+Selection is **positional**, following `LazyListState`'s semantics: `selectedRowIndex` and
+`selectedIndex` are indices, so a row inserted above the selection moves the highlight to whatever
+now sits at that index. Keys make the per-row *state* (each row's own horizontal selection, its
+measured size) follow the row's identity across inserts, removals and reorders — they do not make
+the vertical selection chase a row that moved.
+
 `row(key = ...)` follows `LazyColumn`'s `key` contract. Supply one whenever rows can be inserted,
 removed, filtered or reordered:
 
@@ -397,6 +403,12 @@ RokuLazyColumn {
 ```
 
 Any composable fits without size bookkeeping; all items in a row share the first item's size.
+The first **non-zero** measured size wins and is kept: a first item with no intrinsic size on its
+first layout (an async image with no placeholder dimensions) just keeps the row waiting — it stays
+unselectable and occupies no height, like an empty row, until a real size lands. If your first
+item never has intrinsic size, pass explicit dimensions. Headers are the one exception: a header
+may legitimately measure zero, so its first reading — zero included — is final.
+
 Pass explicit sizes when you want the highlight bounds to differ from the card's measured bounds,
 or to skip the measuring pass on screens with very many rows. The state-based `RokuLazyColumn`
 overload stays fully explicit, and `customRow` always takes its `height` up front.

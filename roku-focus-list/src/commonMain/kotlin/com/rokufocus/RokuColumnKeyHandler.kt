@@ -73,9 +73,15 @@ internal fun Modifier.rokuColumnKeyHandler(
         }
 
         Key.Enter, Key.DirectionCenter, Key.NumPadEnter -> when (activeRow) {
-            is RokuResolvedRow.Items -> {
+            is RokuResolvedRow.Items -> if (activeRow.isSelectable) {
                 onItemClicked?.invoke(rowIndex, activeRow.config.state.selectedIndex)
                 true
+            } else {
+                // Nothing to activate: with no selectable row anywhere, selectedRowIndex is only a
+                // coerced fallback. Left unconsumed to mirror the directional keys, which fall
+                // through to focus escape at the same dead end — an enclosing screen keeps its
+                // chance to act on Enter.
+                false
             }
 
             is RokuResolvedRow.Custom ->
