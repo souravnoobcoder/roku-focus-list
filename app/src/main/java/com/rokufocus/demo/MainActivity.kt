@@ -160,30 +160,51 @@ private fun RequestFocusOnAppear(focusRequester: FocusRequester) {
 fun StreamFocusDemoScreen() {
     var activeScreen by rememberSaveable { mutableStateOf(Screen.COLUMN) }
 
+    // Detail is an overlay above the browse UI, the way OTT apps keep the shelf alive behind a
+    // title page: the column underneath stays composed, so BACK is instant and the selection is
+    // exactly where the user left it. The movie outlives `detailVisible` so the exit fade has
+    // content to draw.
+    var detailMovie by remember { mutableStateOf<MovieItem?>(null) }
+    var detailVisible by remember { mutableStateOf(false) }
+    val openDetail: (MovieItem) -> Unit = { movie ->
+        detailMovie = movie
+        detailVisible = true
+    }
+
     // Two destinations sharing one holder is all it takes for rememberSaveable state — which is
     // what rememberRokuColumnState / rememberRokuFocusListState are built on — to come back where
     // it was when you navigate away and return.
     val stateHolder = rememberSaveableStateHolder()
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF0E0E0E))
-    ) {
-        Sidebar(activeScreen = activeScreen, onScreenSelect = { activeScreen = it })
+    Box(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0E0E0E))
+        ) {
+            Sidebar(activeScreen = activeScreen, onScreenSelect = { activeScreen = it })
 
-        stateHolder.SaveableStateProvider(activeScreen.name) {
-            // Each screen manages its own focus internally
-            when (activeScreen) {
-                Screen.COLUMN  -> ColumnDslContent()
-                Screen.MIXED   -> MixedRowsContent()
-                Screen.RESTORE -> LateRowsContent()
-                Screen.ROW     -> RowDslContent()
-                Screen.STATE   -> RowStateContent()
-                Screen.WRAP    -> WrapAroundContent()
-                Screen.FLOAT   -> FloatingFocusContent()
-                Screen.PLAIN   -> PlainContent()
+            stateHolder.SaveableStateProvider(activeScreen.name) {
+                // Each screen manages its own focus internally
+                when (activeScreen) {
+                    Screen.COLUMN  -> ColumnDslContent(detailOpen = detailVisible, onOpenDetail = openDetail)
+                    Screen.MIXED   -> MixedRowsContent()
+                    Screen.RESTORE -> LateRowsContent()
+                    Screen.ROW     -> RowDslContent()
+                    Screen.STATE   -> RowStateContent()
+                    Screen.WRAP    -> WrapAroundContent()
+                    Screen.FLOAT   -> FloatingFocusContent(detailOpen = detailVisible, onOpenDetail = openDetail)
+                    Screen.PLAIN   -> PlainContent()
+                }
             }
+        }
+
+        detailMovie?.let { movie ->
+            DetailScreen(
+                movie = movie,
+                visible = detailVisible,
+                onDismiss = { detailVisible = false }
+            )
         }
     }
 }
@@ -193,13 +214,23 @@ fun StreamFocusDemoScreen() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ColumnDslContent() {
+private fun ColumnDslContent(
+    detailOpen: Boolean = false,
+    onOpenDetail: (MovieItem) -> Unit = {}
+) {
     val columnState = rememberRokuColumnState()
-    RequestColumnFocusOnAppear(columnState)
+    // One effect covers first appearance and coming back from the detail overlay: whenever no
+    // detail is open, the column is the focus owner.
+    LaunchedEffect(detailOpen) {
+        if (!detailOpen) {
+            delay(120)
+            columnState.requestFocus()
+        }
+    }
 
     ScreenShell(
         title = "RokuLazyColumn DSL",
-        subtitle = "$ROW_COUNT rows \u00b7 6 card types \u00b7 selection survives leaving and returning"
+        subtitle = "$ROW_COUNT rows \u00b7 6 card types \u00b7 click a card for its detail page"
     ) {
         RokuLazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -208,6 +239,9 @@ private fun ColumnDslContent() {
             rowSpacing = 8.dp,
             // Left goes back to the sidebar; the other three edges stay inside the list.
             config = DefaultRokuFocusConfig.copy(focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)),
+            onItemClicked = { rowIndex, itemIndex ->
+                onOpenDetail(allRows[rowIndex].items[itemIndex])
+            },
         ) {
             allRows.forEach { rowDef ->
                 row(
@@ -623,9 +657,17 @@ private fun WrapAroundContent() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FloatingFocusContent() {
+private fun FloatingFocusContent(
+    detailOpen: Boolean = false,
+    onOpenDetail: (MovieItem) -> Unit = {}
+) {
     val columnState = rememberRokuColumnState()
-    RequestColumnFocusOnAppear(columnState)
+    LaunchedEffect(detailOpen) {
+        if (!detailOpen) {
+            delay(120)
+            columnState.requestFocus()
+        }
+    }
 
     ScreenShell(
         title = "Floating Focus",
@@ -640,6 +682,9 @@ private fun FloatingFocusContent() {
                 focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
             ),
             verticalFocusMode = RokuFocusMode.Floating,
+            onItemClicked = { rowIndex, itemIndex ->
+                onOpenDetail(floatingRows[rowIndex].items[itemIndex])
+            },
         ) {
             floatingRows.forEachIndexed { i, rowDef ->
                 row(
