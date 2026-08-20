@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Releases publish to Maven Central straight from the workflow, with no manual approval in the Portal. The workflow then waits for the artifact to appear on `repo1.maven.org` and resolves the coordinate back out of Central through the standalone consumer build, because a successful publish and a usable artifact are not the same thing.
+
 - Publishing moved from JitPack to Maven Central, and the group id from `com.github.souravnoobcoder` to `io.github.souravnoobcoder`. JitPack puts a Kotlin Multiplatform build into multi-module mode, which re-groups every publication under `com.github.owner.repo` and rewrites the Gradle metadata; `commonMain` resolution then fails looking for artifacts that were never published. Verified against the 2.0.0 tag JitPack actually built.
 
 ### Added

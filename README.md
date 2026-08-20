@@ -675,11 +675,21 @@ upload, and a rejection there is a slower way to learn the same thing.
 Only then does it upload. Central comes before tagging on purpose: a rejected deployment should not
 leave a tag behind.
 
-**3. Approve the deployment** at [central.sonatype.com/publishing/deployments](https://central.sonatype.com/publishing/deployments).
-It is staged, not live — nothing resolves until you publish it. Central is immutable once released,
-which is why that button is yours and not CI's.
+There is no manual step. The workflow publishes to Central, and the plugin polls the deployment
+and fails the build if Central rejects it.
+
+**3. It verifies itself.** After publishing it waits for the artifact to appear on
+`repo1.maven.org`, then resolves `io.github.souravnoobcoder:roku-focus-list:<version>` back out of
+Central through the standalone consumer build — `commonMain` and every target, with `mavenLocal()`
+stripped and `--refresh-dependencies` so nothing can resolve from the copy CI just published
+locally. A successful publish is not the same as a usable artifact, and this project has already
+shipped one that wasn't; see the [1.x → 2.0 table](#migrating-from-1x-to-20).
 
 Pass `-f dry_run=true` to run every check without tagging or uploading.
+
+The build itself stays staging-only (`automaticRelease = false`). Releasing is a decision the
+workflow makes by calling `publishAndReleaseToMavenCentral`, so running `publishToMavenCentral`
+by hand can never publish irrevocably.
 
 ### One-time setup
 

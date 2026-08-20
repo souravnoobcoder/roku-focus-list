@@ -67,6 +67,8 @@ kotlin {
 }
 
 mavenPublishing {
+    // Left staging-only on purpose. CI releases by calling publishAndReleaseToMavenCentral
+    // explicitly, so running publishToMavenCentral by hand can never publish irrevocably.
     publishToMavenCentral(automaticRelease = false)
 
     // Central rejects unsigned artifacts, but signing unconditionally would break
