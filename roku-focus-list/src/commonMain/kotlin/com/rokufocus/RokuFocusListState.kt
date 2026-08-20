@@ -32,20 +32,37 @@ import kotlin.math.max
  * @param initialIndex Index to select. May exceed [itemCount]; see above.
  * @param visibleCount How many items fit in the viewport. Overwritten by the composable that
  *   renders the row, which measures it.
- * @property focusSlot Which visible slot the highlight sits at (0 = leading edge).
+ * @property focusSlot Which visible slot the highlight sits at (0 = leading edge). Only meaningful
+ *   in [RokuFocusMode.Static]; a floating window has no fixed slot, so it is ignored there.
+ * @property focusMode How the highlight relates to scrolling: parked at [focusSlot] while content
+ *   scrolls ([RokuFocusMode.Static]), or walking the visible window and scrolling only at its
+ *   edges ([RokuFocusMode.Floating]).
  */
 @Stable
 class RokuFocusListState(
     itemCount: Int,
     initialIndex: Int = 0,
     visibleCount: Int = 1,
-    val focusSlot: Int = 0
+    val focusSlot: Int = 0,
+    val focusMode: RokuFocusMode = RokuFocusMode.Static
 ) {
     private var _requestedIndex by mutableIntStateOf(initialIndex.coerceAtLeast(0))
     private var _itemCount by mutableIntStateOf(itemCount.coerceAtLeast(0))
+    private var _visibleCount by mutableIntStateOf(visibleCount)
+
+    /**
+     * Raw [RokuFocusMode.Floating] window anchor. Stored raw and bounds-clamped on read, like
+     * [requestedIndex]: a window pushed out of range by a shrinking list comes back where it was
+     * once the items return, because the clamp is never written back.
+     */
+    internal var windowAnchor by mutableIntStateOf(0)
 
     internal val keyRepeat = RokuKeyRepeatTracker()
     internal val focusRequester = FocusRequester()
+
+    init {
+        containWindow()
+    }
 
     /** The last index anyone asked for, before coercion. Re-applied whenever the row grows. */
     val requestedIndex: Int get() = _requestedIndex
@@ -58,8 +75,13 @@ class RokuFocusListState(
     val itemCount: Int get() = _itemCount
 
     /** How many items fit in the viewport. Auto-computed by [RokuLazyRow] / [RokuLazyColumn]. */
-    var visibleCount by mutableIntStateOf(visibleCount)
-        internal set
+    var visibleCount: Int
+        get() = _visibleCount
+        internal set(value) {
+            if (_visibleCount == value) return
+            _visibleCount = value
+            containWindow()
+        }
 
     /**
      * True while this row renders as focused: it holds platform focus when used standalone, or it
@@ -69,9 +91,14 @@ class RokuFocusListState(
         internal set
 
     val windowStart: Int
-        get() {
-            val ideal = selectedIndex - focusSlot
-            return ideal.coerceIn(0, max(0, _itemCount - visibleCount))
+        get() = when (focusMode) {
+            RokuFocusMode.Static -> {
+                val ideal = selectedIndex - focusSlot
+                ideal.coerceIn(0, max(0, _itemCount - _visibleCount))
+            }
+
+            RokuFocusMode.Floating ->
+                windowAnchor.coerceIn(0, max(0, _itemCount - _visibleCount))
         }
 
     val highlightSlot: Int
@@ -98,6 +125,7 @@ class RokuFocusListState(
     /** Selects [index], remembering it as the request even when the row is currently shorter. */
     fun scrollTo(index: Int) {
         _requestedIndex = index.coerceAtLeast(0)
+        containWindow()
     }
 
     /**
@@ -106,7 +134,33 @@ class RokuFocusListState(
      * grows to include it.
      */
     fun updateItemCount(newCount: Int) {
-        _itemCount = newCount.coerceAtLeast(0)
+        val coerced = newCount.coerceAtLeast(0)
+        if (_itemCount == coerced) return
+        _itemCount = coerced
+        containWindow()
+    }
+
+    /**
+     * Keeps the floating window containing the selection. Runs from every write that can move the
+     * selection relative to the window — [scrollTo], [updateItemCount], the [visibleCount] setter —
+     * and shifts [windowAnchor] minimally: forward until the selection is last visible, backward
+     * until it is first visible. Deliberately not in the [windowStart] getter: a read-side shift
+     * that is never stored flip-flops, snapping back to the stale anchor on the next in-window
+     * move. Comparing against the clamped [windowStart] rather than the raw anchor keeps a purely
+     * data-driven shrink from overwriting the anchor the raw value still remembers.
+     *
+     * The callers guard on value equality first: [updateItemCount] and the [visibleCount] setter
+     * run from composition on every pass, and the selection reads here would otherwise subscribe
+     * that composition scope to every future selection change.
+     */
+    private fun containWindow() {
+        if (focusMode != RokuFocusMode.Floating) return
+        val selected = selectedIndex
+        val start = windowStart
+        when {
+            selected < start -> windowAnchor = selected
+            selected > start + _visibleCount - 1 -> windowAnchor = selected - _visibleCount + 1
+        }
     }
 
     /**
@@ -123,8 +177,8 @@ class RokuFocusListState(
 
     companion object {
         /**
-         * Saves the requested index and the focus slot, mirroring how `LazyListState.Saver` stores
-         * its indices. Use it when hoisting a state into your own `rememberSaveable`.
+         * Saves the requested index, the focus slot, the focus mode and the floating window
+         * anchor, mirroring how `LazyListState.Saver` stores its indices. Use it when hoisting a state into your own `rememberSaveable`.
          *
          * The item count is deliberately **not** saved: it describes the data, not the selection,
          * and a count restored from a previous run can easily exceed what the data source has this
@@ -133,13 +187,14 @@ class RokuFocusListState(
          * with the count you actually have. [rememberRokuFocusListState] does that for you.
          */
         val Saver: Saver<RokuFocusListState, *> = listSaver(
-            save = { listOf(it.requestedIndex, it.focusSlot) },
+            save = { listOf(it.requestedIndex, it.focusSlot, it.focusMode.ordinal, it.windowAnchor) },
             restore = {
                 RokuFocusListState(
                     itemCount = 0,
                     initialIndex = it[0],
-                    focusSlot = it[1]
-                )
+                    focusSlot = it[1],
+                    focusMode = RokuFocusMode.entries[it[2]]
+                ).also { restored -> restored.windowAnchor = it[3] }
             }
         )
     }
@@ -152,34 +207,40 @@ class RokuFocusListState(
  *   the selection from the last requested index.
  * @param initialIndex Index to select the first time the state is created.
  * @param focusSlot Which visible slot the highlight sits at. Changing it recreates the state.
+ *   Ignored in [RokuFocusMode.Floating].
+ * @param focusMode How the highlight relates to scrolling; see [RokuFocusMode]. Changing it
+ *   recreates the state.
  */
 @Composable
 fun rememberRokuFocusListState(
     itemCount: Int,
     initialIndex: Int = 0,
-    focusSlot: Int = 0
+    focusSlot: Int = 0,
+    focusMode: RokuFocusMode = RokuFocusMode.Static
 ): RokuFocusListState {
-    // Pinning focusSlot into the saver keeps a restored state on the slot the caller asks for
-    // today: rememberSaveable compares `inputs` within a composition, but a value coming back
-    // across process death was saved before those inputs existed.
-    val saver = remember(focusSlot) {
+    // Pinning focusSlot and focusMode into the saver keeps a restored state on what the caller
+    // asks for today: rememberSaveable compares `inputs` within a composition, but a value coming
+    // back across process death was saved before those inputs existed.
+    val saver = remember(focusSlot, focusMode) {
         listSaver<RokuFocusListState, Int>(
-            save = { listOf(it.requestedIndex) },
+            save = { listOf(it.requestedIndex, it.windowAnchor) },
             restore = {
                 RokuFocusListState(
                     itemCount = 0,
                     initialIndex = it[0],
-                    focusSlot = focusSlot
-                )
+                    focusSlot = focusSlot,
+                    focusMode = focusMode
+                ).also { restored -> restored.windowAnchor = it[1] }
             }
         )
     }
 
-    val state = rememberSaveable(focusSlot, saver = saver) {
+    val state = rememberSaveable(focusSlot, focusMode, saver = saver) {
         RokuFocusListState(
             itemCount = itemCount,
             initialIndex = initialIndex,
-            focusSlot = focusSlot
+            focusSlot = focusSlot,
+            focusMode = focusMode
         )
     }
 

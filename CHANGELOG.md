@@ -9,11 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `row(...)`'s `headerHeight` default changed from `0.dp` to auto-measure. A 2.0 caller passing a `header` without `headerHeight` used to get a highlight Y computed against a zero-height header (visibly misaligned); the header is now measured and the highlight lands below it. Callers that passed an explicit `headerHeight` are unaffected.
+
+- A key press no longer does O(rows) work in the column: all per-row pixel geometry is precomputed into arrays inside a `derivedStateOf` whose only observable inputs are the rows' item counts, and the per-rail `visibleCount` sync is keyed on the rows and viewport. Navigation now reads cached arrays and allocates nothing — previously every press rebuilt and value-compared a metrics list across all rows (100 allocations per press on a 100-row screen).
+
+- A D-pad move now recomposes only the rows and items whose focus actually changed, instead of every visible row and card wrapper. The column's row content is one remembered lambda (the row list is unstable, so the compiler was recreating it every pass and invalidating everything under it), selection is read per item through `derivedStateOf`, and the row scroll follows `windowStart` through a `snapshotFlow` instead of a composition read. Measured on a TV emulator: five horizontal presses went from 78 item-wrapper and 15 row recompositions to 14 and 0. Cards with unstable parameters — which cannot self-skip — stop re-running wholesale on every press.
+
 - Releases publish to Maven Central straight from the workflow, with no manual approval in the Portal. The workflow then waits for the artifact to appear on `repo1.maven.org` and resolves the coordinate back out of Central through the standalone consumer build, because a successful publish and a usable artifact are not the same thing.
 
 - Publishing moved from JitPack to Maven Central, and the group id from `com.github.souravnoobcoder` to `io.github.souravnoobcoder`. JitPack puts a Kotlin Multiplatform build into multi-module mode, which re-groups every publication under `com.github.owner.repo` and rewrites the Gradle metadata; `commonMain` resolution then fails looking for artifacts that were never published. Verified against the 2.0.0 tag JitPack actually built.
 
 ### Added
+
+- Auto-measured row sizes in the `RokuLazyColumn` DSL: `row(...)` no longer requires `itemWidth` / `itemHeight` / `headerHeight`. Omitted dimensions are measured by composing the first item (and the header) invisibly once, the way the DSL `RokuLazyRow` already measures its item width, so any composable fits without size bookkeeping. A row waiting on measurement behaves exactly like an empty row — skipped, zero height — and appears through the same machinery that handles late-arriving rows. Explicit sizes still win and skip the measuring pass; the state-based overload stays fully explicit.
+
+- `RokuFocusMode` — per-axis choice between `Static` (Roku-style: the highlight parks at a fixed slot and the content scrolls behind it — the previous behaviour, still the default) and `Floating` (leanback-style: the highlight walks the visible window and the list scrolls only when the selection would leave it, by the minimum needed to keep it visible). Horizontal mode is `focusMode` on `RokuFocusListState` / `rememberRokuFocusListState`, on the DSL `RokuLazyRow` and on `row(...)`; vertical mode is `verticalFocusMode` on both `RokuLazyColumn` overloads. The two axes are independent, so any combination works. `focusSlot` only applies in `Static`. The floating window anchors join both `Saver`s, so a restored screen comes back with the window where it was, not just the selection.
 
 - Repository scaffolding: CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue/PR templates, CI workflow, funding config.
 

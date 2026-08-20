@@ -219,7 +219,7 @@ RokuLazyColumn(state = columnState) { /* rows */ }
 | `columnState.hasFocus` | Observable — true while the column holds platform focus. |
 | `columnState.requestFocus()` | Move platform focus onto the column. Returns `false` if it is not laid out yet. |
 | `rowState.requestFocus()` | Same, for a **standalone** `RokuLazyRow`. Inside a column the column is the focus target — use `columnState.requestFocus()` and `moveToRow`. |
-| `rememberRokuFocusListState(itemCount, initialIndex, focusSlot)` | Per-row selection, also saveable. |
+| `rememberRokuFocusListState(itemCount, initialIndex, focusSlot, focusMode)` | Per-row selection, also saveable. |
 | `rowState.selectedIndex` / `scrollTo(index)` | Read or set the selected item. |
 | `rowState.moveNext()` / `movePrevious()` | Step the selection. Returns `false` at an edge. |
 | `rowState.hasFocus` | True while the row renders as focused (standalone, or the active row of a focused column). |
@@ -255,6 +255,12 @@ grows a row.
 ---
 
 ## Row identity (`key`)
+
+Selection is **positional**, following `LazyListState`'s semantics: `selectedRowIndex` and
+`selectedIndex` are indices, so a row inserted above the selection moves the highlight to whatever
+now sits at that index. Keys make the per-row *state* (each row's own horizontal selection, its
+measured size) follow the row's identity across inserts, removals and reorders — they do not make
+the vertical selection chase a row that moved.
 
 `row(key = ...)` follows `LazyColumn`'s `key` contract. Supply one whenever rows can be inserted,
 removed, filtered or reordered:
@@ -379,9 +385,76 @@ border extends outside the card) and `animateScale`.
 
 ---
 
+## Row sizing: explicit or auto-measured
+
+Rows in the `RokuLazyColumn` DSL don't need dimensions — omit them and the column measures the
+first item (and the header) by composing it invisibly once, the same way the DSL `RokuLazyRow`
+auto-measures its item width:
+
+```kotlin
+RokuLazyColumn {
+    row(key = "trending", header = { Text("Trending") }) {
+        items(movies) { movie, isFocused -> MovieCard(movie, isFocused) }   // sized from the card
+    }
+    row(itemWidth = 150.dp, itemHeight = 150.dp, key = "avatars") {         // explicit override
+        items(profiles) { p, isFocused -> Avatar(p, isFocused) }
+    }
+}
+```
+
+Any composable fits without size bookkeeping; all items in a row share the first item's size.
+The first **non-zero** measured size wins and is kept: a first item with no intrinsic size on its
+first layout (an async image with no placeholder dimensions) just keeps the row waiting — it stays
+unselectable and occupies no height, like an empty row, until a real size lands. If your first
+item never has intrinsic size, pass explicit dimensions. Headers are the one exception: a header
+may legitimately measure zero, so its first reading — zero included — is final.
+
+Pass explicit sizes when you want the highlight bounds to differ from the card's measured bounds,
+or to skip the measuring pass on screens with very many rows. The state-based `RokuLazyColumn`
+overload stays fully explicit, and `customRow` always takes its `height` up front.
+
+---
+
+## Focus modes: Static vs Floating
+
+Each axis chooses how the highlight relates to scrolling, independently:
+
+- **`RokuFocusMode.Static`** (default, and the whole point of the library's name): the highlight
+  stays parked at a fixed slot and the content scrolls behind it on every move — how Roku's home
+  screen behaves.
+- **`RokuFocusMode.Floating`**: the list holds still and the highlight walks across the visible
+  items or rows. It only scrolls when the selection would leave the visible window, and then by
+  the minimum needed to keep it visible — how Android TV's leanback rows behave.
+
+```kotlin
+// Vertical floating (rows hold still, highlight walks down), horizontal static (default):
+RokuLazyColumn(verticalFocusMode = RokuFocusMode.Floating) {
+    row(itemWidth = 220.dp, itemHeight = 140.dp) { /* items */ }              // static rail
+    row(itemWidth = 220.dp, itemHeight = 140.dp,
+        focusMode = RokuFocusMode.Floating) { /* items */ }                   // floating rail
+}
+
+// Standalone row:
+RokuLazyRow(focusMode = RokuFocusMode.Floating) { /* items */ }
+
+// Hoisted state:
+val state = rememberRokuFocusListState(
+    itemCount = movies.size,
+    focusMode = RokuFocusMode.Floating
+)
+```
+
+Pick `Static` when you want the eye to never travel (content does the moving); pick `Floating`
+when you want the scroll position to stay put while the user browses what is already on screen.
+Both modes remember their window across configuration changes and process death, and both apply
+the same edge-overflow correction. `focusSlot` only means something in `Static` — a floating
+window has no fixed slot — so it is ignored in `Floating`.
+
+---
+
 ## Focus Slot
 
-Control where the highlight sits within the visible window:
+In `Static` mode, control where the highlight sits within the visible window:
 
 ```kotlin
 RokuLazyRow(focusSlot = 0) { /* items */ }   // leftmost visible item (default)
@@ -523,7 +596,7 @@ RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 |---|---|
 | `RokuLazyRow` | Horizontal fixed-focus row. DSL variant auto-measures width; state variant takes explicit `itemWidth`. |
 | `RokuLazyColumn` | Vertical + horizontal OTT grid. DSL variant manages per-row state internally; state variant takes `List<RokuColumnRowConfig>`. |
-| `RokuLazyColumnScope.row` | A rail of equal-size cards. |
+| `RokuLazyColumnScope.row` | A rail of equal-size cards. Sizes explicit, or measured from the first item when omitted. |
 | `RokuLazyColumnScope.customRow` | Anything else, with LEFT/RIGHT/ENTER delegated to it. |
 | `DefaultFocusHighlight` | Default white rounded-border highlight. `BoxScope` extension, fully replaceable. |
 | `Modifier.rokuKeyHandler` | Low-level D-pad handler, for wiring your own container. |
@@ -535,6 +608,7 @@ RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 | `RokuColumnState` | Which row is selected; focus control; observable `hasFocus`. |
 | `RokuFocusListState` | Which item of a row is selected. |
 | `RokuFocusConfig` | Navigation behaviour. |
+| `RokuFocusMode` | Per-axis `Static` (fixed slot, content scrolls) vs `Floating` (highlight walks, scrolls at window edges). |
 | `RokuFocusEscape` | Per-edge focus escape. |
 | `RokuHighlightScope` | Receiver of `focusHighlight`: `BoxScope` + `rowIndex`, `itemIndex`. |
 | `RokuNavKey` | `Left` / `Right` / `Enter`, handed to `customRow`'s `onKeyEvent`. |
@@ -580,6 +654,8 @@ keep their 1.x signatures.
 5. The highlight overlay is positioned with `graphicsLayer { translationX/Y }` (GPU-only, no re-layout)
 6. At list edges, overflow correction shifts the highlight to match the actual item position
 7. In `RokuLazyColumn`, one global highlight animates X, Y, width, and height between rows of different card sizes
+8. `RokuFocusMode.Floating` keeps a raw window anchor per axis and only moves it when a selection
+   change would leave the window — same maths, different scroll target
 
 Key-repeat throttling uses `kotlin.time.TimeSource.Monotonic` rather than Android's `SystemClock`,
 which is why no platform-specific source set is needed.

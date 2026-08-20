@@ -63,6 +63,17 @@ kotlin {
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
+
+        // Compose UI tests run on the desktop JVM target only: headless, no emulator, and they
+        // exercise the exact commonMain composables every platform ships.
+        val desktopTest by getting {
+            dependencies {
+                implementation(libs.compose.mp.ui.test)
+                // Skiko's native runtime for whichever machine runs the tests: the library never
+                // renders on its own, so nothing else pulls it, and headless ui-tests need it.
+                implementation(compose.desktop.currentOs)
+            }
+        }
     }
 }
 

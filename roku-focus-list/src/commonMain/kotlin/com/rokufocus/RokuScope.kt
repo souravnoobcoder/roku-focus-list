@@ -122,6 +122,7 @@ class RokuLazyColumnScope internal constructor() {
             val contentPadding: PaddingValues,
             val focusSlot: Int,
             val initialIndex: Int,
+            val focusMode: RokuFocusMode,
             val header: (@Composable (isRowFocused: Boolean) -> Unit)?,
             val itemCount: Int,
             val itemKey: ((Int) -> Any)?,
@@ -143,12 +144,25 @@ class RokuLazyColumnScope internal constructor() {
     /**
      * Declare a horizontal row with fixed-size items.
      *
-     * @param itemWidth Width of each card in this row.
-     * @param itemHeight Height of each card (used for highlight sizing).
+     * Sizing is optional: leave [itemWidth] / [itemHeight] / [headerHeight] out and the column
+     * measures them from the first item (and the header) by composing it invisibly once, the same
+     * way the DSL [RokuLazyRow] auto-measures. Items still share one size — the first item's.
+     * The first **non-zero** measured size wins and is kept; until one lands (an async image with
+     * no placeholder dimensions reports 0x0 on first layout) the row behaves like an empty row.
+     * Items whose first layout never has intrinsic size need explicit dimensions. A header's
+     * first reading is final even when zero — a zero-height header is legitimate. Passing
+     * explicit sizes skips the measuring pass, which is worth doing on screens with very many
+     * rows.
+     *
+     * @param itemWidth Width of each card in this row. Omit to measure it from the first item.
+     * @param itemHeight Height of each card (used for highlight sizing). Omit to measure it from
+     *   the first item.
      * @param itemSpacing Horizontal gap between cards.
      * @param contentPadding Horizontal padding around the row content.
-     * @param headerHeight Height of the [header] composable. Must match actual rendered height.
-     * @param focusSlot Which visible slot the highlight sits at (0 = leftmost).
+     * @param headerHeight Height of the [header] composable. Omit to measure the header; an
+     *   explicit value must match the actual rendered height.
+     * @param focusSlot Which visible slot the highlight sits at (0 = leftmost). Ignored in
+     *   [RokuFocusMode.Floating].
      * @param initialIndex Item selected the first time this row's state is created. It is
      *   remembered as a request, so an index that only becomes valid once items arrive is honored
      *   then rather than clamped away.
@@ -157,18 +171,21 @@ class RokuLazyColumnScope internal constructor() {
      *   remembered against this key, so without it selection stays attached to the *position* and
      *   silently moves to a different row. Keys must be unique within the column and savable.
      *   It sits after the sizing parameters so that 1.x positional calls keep their meaning.
+     * @param focusMode How this row's highlight relates to horizontal scrolling; see
+     *   [RokuFocusMode]. [focusSlot] only applies in [RokuFocusMode.Static].
      * @param header Optional composable rendered above the row. Receives `isRowFocused`.
      * @param content Item declarations via [RokuItemScope.items].
      */
     fun row(
-        itemWidth: Dp,
-        itemHeight: Dp,
+        itemWidth: Dp = Dp.Unspecified,
+        itemHeight: Dp = Dp.Unspecified,
         itemSpacing: Dp = 14.dp,
         contentPadding: PaddingValues = PaddingValues(0.dp),
-        headerHeight: Dp = 0.dp,
+        headerHeight: Dp = Dp.Unspecified,
         focusSlot: Int = 0,
         initialIndex: Int = 0,
         key: Any? = null,
+        focusMode: RokuFocusMode = RokuFocusMode.Static,
         header: (@Composable (isRowFocused: Boolean) -> Unit)? = null,
         content: RokuItemScope.() -> Unit
     ) {
@@ -183,6 +200,7 @@ class RokuLazyColumnScope internal constructor() {
                 contentPadding = contentPadding,
                 focusSlot = focusSlot,
                 initialIndex = initialIndex,
+                focusMode = focusMode,
                 header = header,
                 itemCount = scope.itemCount,
                 itemKey = scope.itemKey,
