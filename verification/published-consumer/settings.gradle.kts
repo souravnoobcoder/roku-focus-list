@@ -10,6 +10,12 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
+// A consumer building for Apple TV applies this themselves; the library's own published metadata
+// stays on the official org.jetbrains.compose coordinates.
+plugins {
+    id("dev.sajidali.compose-tvos") version "1.4.2"
+}
+
 dependencyResolutionManagement {
     repositories {
         mavenLocal()

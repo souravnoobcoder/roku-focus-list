@@ -57,6 +57,7 @@ Tests live in `src/commonTest/kotlin/com/rokufocus/` and run on the desktop JVM 
 - **A row with zero items is not selectable.** UP/DOWN steps over it, the highlight never parks on it, it renders nothing (not even its header) and contributes zero height to the column geometry. Its row index and key are unchanged.
 - **The column re-scrolls when the geometry changes, not only when the selection does.** `animateScrollToItem` clamps at the end of a still-loading list; without re-running when rows arrive, the real scroll offset diverges from the offset the highlight maths assumes.
 - **`RokuLazyColumn` retracts `hasFocus` from the row state it last marked**, so a hoisted row state is never left reading "focused" by a column that no longer renders it.
+- **The vertical accelerated-repeat snap is intentional, and the horizontal path deliberately has no counterpart.** `RokuLazyColumn` swaps `animateScrollToItem` for an instant `scrollToItem` once `keyRepeat.consecutivePresses > config.keyRepeatAccelAfter`; `RokuRowContent` always animates, relying on `collectLatest` to cancel and re-target an in-flight animation instead. The asymmetry is the settled choice, in that direction: animation is the default everywhere and the snap is only an escape hatch for a user holding the key down. Instrumented on real Apple TV hardware across 35 vertical moves the snap branch fired **once**, and it was not the cause of the jerky scrolling in that investigation (density/frame-rate was — see the README). Do not resolve the asymmetry by adding a snap branch to the horizontal path; if it is ever resolved, resolve it toward always animating.
 - **`RokuClock` offsets readings by a 1,000,000ms baseline.** The key handlers seed `lastKeyTime = 0L` to mean "no key pressed yet"; `SystemClock.uptimeMillis()` returned time since boot so 0 always looked far in the past. A clock starting near zero would have made the first D-pad press get throttled. Do not remove the baseline.
 - **`@SuppressLint` is unavailable in commonMain.** `UnusedBoxWithConstraintsScope` is disabled via `lint { disable += ... }` in the library's `kotlin { android { } }` block instead.
 
@@ -116,13 +117,18 @@ Wrap-Around, Floating Focus, Plain Compose comparison). Images from `picsum.phot
 | Module | Purpose |
 |---|---|
 | `consumer-kmp/` | KMP library whose `commonMain` uses `RokuLazyRow` / `RokuLazyColumn` via `project(":roku-focus-list")`. Proves commonMain consumption compiles for android + desktop + iOS. |
-| `verification/published-consumer/` | **Standalone** Gradle build (own `settings.gradle.kts`, not in root settings). Resolves `com.github.souravnoobcoder:roku-focus-list:2.0.0` from `mavenLocal()` in `commonMain`. Run with `./gradlew -p verification/published-consumer verifyCommonMainConsumption`. Proves the published Gradle module metadata works. |
+| `verification/published-consumer/` | **Standalone** Gradle build (own `settings.gradle.kts`, not in root settings). Resolves `io.github.souravnoobcoder:roku-focus-list:2.2.0` from `mavenLocal()` in `commonMain`, and applies the `compose-tvos` settings plugin so the tvOS leg proves an Apple TV consumer resolves too. Run with `./gradlew -p verification/published-consumer verifyCommonMainConsumption`. Proves the published Gradle module metadata works. |
 
 ## Build
 
-- AGP 9.0.1, Gradle 9.1.0, Kotlin 2.2.21, Compose Multiplatform 1.10.3
-- Compose BOM 2026.03.00 in the demo app — pins androidx Compose to 1.10.5, which is exactly what CMP 1.10.3 resolves to on Android. Do not desync these.
-- minSdk 24, compileSdk 36, jvmTarget 11
+- AGP 9.2.1, Gradle 9.4.1, Kotlin 2.4.10, Compose Multiplatform 1.12.0
+- Compose BOM 2026.08.00 in the demo app — pins androidx Compose to 1.12.0, which is exactly what CMP 1.12.0 resolves to on Android. Do not desync these.
+- minSdk 24 (app) / 23 (library), compileSdk 37, jvmTarget 11. compileSdk 37 + AGP 9.1 are the minimum CMP 1.12.0's Android artifacts declare in aar-metadata; lower fails the manifest merge.
+- **Targets: android, jvm("desktop"), iosArm64, iosSimulatorArm64, tvosArm64, tvosSimulatorArm64, wasmJs.** No Apple x86_64 (`iosX64`/`tvosX64`) — CMP 1.11+ ships none.
+- **tvOS needs the `dev.sajidali.compose-tvos` settings plugin**, declared in a `plugins { }` block directly after `pluginManagement { }` in `settings.gradle.kts`. JetBrains publishes no tvOS Compose artifacts; the plugin redirects the official `org.jetbrains.compose.*` coordinates onto the `sajidalidev/compose-multiplatform-core` fork (`dev.sajidali.*`) at resolution time, for tvOS configurations only. Verified: the **published** metadata keeps the official coordinates, so consumers are not hard-wired to the fork. Do NOT enable `composeTvos { strictMode }` — false positives on iOS-only platform leaves and conflict-resolution losers.
+- The fork publishes tvOS klibs for CMP **1.12.0 and 1.12.0-beta01 only**. Downgrading Compose Multiplatform breaks tvOS.
+- `kotlin.native.enableKlibsCrossCompilation=true` in gradle.properties lets the Linux release runner emit Apple klibs. Klib cross-compilation is host-agnostic; only final binaries and cinterop/CocoaPods need macOS, and this library has neither.
+- The wasmJs test tasks and `checkComposeUiTestConfigurationForWasmJs` are disabled in the library build: that check wants a Skiko runtime bundled via `binaries.executable()`, which a library should not declare, and these tests are pure `kotlin.test` state maths that never touch Skiko.
 - Library depends only on CMP runtime/runtime-saveable/foundation/ui/animation (no Material)
 - Demo app adds Coil 3 (`coil-compose` + `coil-network-okhttp`), Material3
 - **The demo app must NOT apply `org.jetbrains.kotlin.android`** — AGP 9 has built-in Kotlin support and hard-errors if KGP's android plugin is applied. It picks up KGP 2.2.21 from the root buildscript classpath.
@@ -132,9 +138,9 @@ Wrap-Around, Floating Focus, Plain Compose comparison). Images from `picsum.phot
 
 ## Publishing
 
-- Group `io.github.souravnoobcoder`, artifact `roku-focus-list`, version `2.1.0`, published to Maven Central via the Sonatype Central Portal (`com.vanniktech.maven.publish`).
+- Group `io.github.souravnoobcoder`, artifact `roku-focus-list`, version `2.2.0`, published to Maven Central via the Sonatype Central Portal (`com.vanniktech.maven.publish`).
 - **JitPack cannot serve this library.** Six KMP publications trip its multi-module handling: it re-groups everything under `com.github.owner.repo` and rewrites the metadata, after which a `commonMain` dependency fails on `Could not find roku-focus-list-iosarm64-<v>.jar`. Verified against the real 2.0.0 tag it built. Do not go back.
-- KMP `maven-publish` creates 6 publications: `kotlinMultiplatform` (root, carries the commonMain metadata variant and redirects), `android`, `desktop`, `iosArm64`, `iosSimulatorArm64`, `iosX64`.
+- KMP `maven-publish` creates 8 publications: `kotlinMultiplatform` (root, carries the commonMain metadata variant and redirects), `android`, `desktop`, `iosArm64`, `iosSimulatorArm64`, `tvosArm64`, `tvosSimulatorArm64`, `wasmJs`.
 - Consumers only ever reference the root coordinate.
 - `consumer-rules.pro` is published inside the AAR as `proguard.txt` via `optimization { consumerKeepRules.apply { publish = true; file(...) } }`.
 - Signing is applied only when `signingInMemoryKey` is present, so `publishToMavenLocal` works without a GPG key. The release workflow refuses to upload unsigned.
@@ -147,6 +153,7 @@ Wrap-Around, Floating Focus, Plain Compose comparison). Images from `picsum.phot
 - An empty row still leaves the row spacing on either side of it, because `LazyColumn` allocates spacing around a zero-height item
 - `RokuFocusEscape.start` / `.end` map to LEFT / RIGHT; nothing mirrors for RTL yet
 - Public `data class`es (`RokuFocusConfig`, `RokuFocusEscape`, `RokuColumnRowConfig`) make the ABI hard to evolve; there is no binary-compatibility validator yet
-- iOS klibs compile but the library has not been exercised on an iOS runtime
+- iOS klibs compile but the library has not been exercised on an iOS runtime (tvOS, by contrast, is verified on a simulator and on real Apple TV hardware)
 - Accessibility was verified from the emitted node tree (`uiautomator dump` on an API 31 TV emulator), not end to end with TalkBack
-- Web (`wasmJs`/`js`) targets are not declared; CMP web is still Beta
+- `wasmJs` compiles and is published, but has not been exercised on a real Tizen TV; `js` is still not declared
+- Tizen 8.0 (2024 TVs, Chromium M108) cannot run the wasm build — WebAssembly GC shipped in Chromium 119

@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -20,7 +21,9 @@ version = (System.getenv("VERSION") ?: providers.gradleProperty("libraryVersion"
 kotlin {
     android {
         namespace = "com.rokufocus"
-        compileSdk = 36
+        // Compose Multiplatform 1.12.0's Android artifacts declare AGP 9.1 / compileSdk 37 as
+        // their minimum in aar-metadata; anything lower fails the manifest merge.
+        compileSdk = 37
         minSdk = 23
 
         compilerOptions {
@@ -47,9 +50,18 @@ kotlin {
         }
     }
 
-    iosX64()
+    // No iosX64/tvosX64: Compose Multiplatform 1.11+ ships no Apple x86_64 artifacts at all, so
+    // an Intel-Mac simulator target has nothing to link against.
     iosArm64()
     iosSimulatorArm64()
+
+    tvosArm64()
+    tvosSimulatorArm64()
+
+    // A Samsung Tizen TV app is a web app, so Tizen support is just a working wasmJs target —
+    // there is nothing Tizen-specific in the library.
+    @OptIn(ExperimentalWasmDsl::class)
+    wasmJs { browser() }
 
     sourceSets {
         commonMain.dependencies {
@@ -75,6 +87,16 @@ kotlin {
             }
         }
     }
+}
+
+// checkComposeUiTestConfigurationForWasmJs wants a Skiko runtime bundled through
+// binaries.executable(), which a library has no business declaring. These tests are pure
+// kotlin.test state maths that never touch Skiko, so the check is a false positive — and the same
+// tests still run on desktop and on the native simulators.
+tasks.matching {
+    it.name == "checkComposeUiTestConfigurationForWasmJs" || it.name.startsWith("wasmJsBrowserTest")
+}.configureEach {
+    enabled = false
 }
 
 mavenPublishing {

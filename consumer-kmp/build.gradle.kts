@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 // Verification module: proves roku-focus-list is consumable from a Kotlin Multiplatform
@@ -12,7 +13,7 @@ plugins {
 kotlin {
     android {
         namespace = "com.rokufocus.consumer"
-        compileSdk = 36
+        compileSdk = 37
         minSdk = 24
 
         compilerOptions {
@@ -26,9 +27,14 @@ kotlin {
         }
     }
 
-    iosX64()
     iosArm64()
     iosSimulatorArm64()
+
+    tvosArm64()
+    tvosSimulatorArm64()
+
+    @OptIn(ExperimentalWasmDsl::class)
+    wasmJs { browser() }
 
     sourceSets {
         commonMain.dependencies {

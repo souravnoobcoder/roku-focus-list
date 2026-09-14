@@ -106,8 +106,10 @@ jobs:
             :roku-focus-list:compileAndroidMain \
             :roku-focus-list:compileKotlinDesktop \
             :roku-focus-list:compileKotlinIosArm64 \
-            :roku-focus-list:compileKotlinIosX64 \
             :roku-focus-list:compileKotlinIosSimulatorArm64 \
+            :roku-focus-list:compileKotlinTvosArm64 \
+            :roku-focus-list:compileKotlinTvosSimulatorArm64 \
+            :roku-focus-list:compileKotlinWasmJs \
             :roku-focus-list:desktopTest \
             :consumer-kmp:compileCommonMainKotlinMetadata \
             :consumer-kmp:compileAndroidMain \
