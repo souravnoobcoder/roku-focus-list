@@ -48,19 +48,67 @@ that depends on Google's `androidx.compose.*` artifacts, exactly as before.
 
 | Target | Status | Notes |
 |---|---|---|
-| `androidTarget` (Android, Android TV, Fire TV) | Supported, verified | The primary use case. minSdk 24. |
+| `androidTarget` (Android, Android TV, Fire TV) | Supported, verified | The primary use case. minSdk 23. |
 | `jvm("desktop")` (Windows / macOS / Linux) | Supported, verified | Arrow keys and Enter work. Needs JDK 11+. |
-| `iosX64`, `iosArm64`, `iosSimulatorArm64` | Compiles, runtime untested | See [Platform limitations](#platform-limitations). |
-| `wasmJs` / `js` (web) | Not declared | Easy to add — see below. |
+| `tvosArm64`, `tvosSimulatorArm64` (Apple TV) | Supported, verified on device | Needs one extra plugin line — see [Apple TV](#apple-tv-tvos). |
+| `iosArm64`, `iosSimulatorArm64` | Compiles, runtime untested | See [Platform limitations](#platform-limitations). |
+| `wasmJs` (web, Samsung Tizen TV) | Supported, compiles | See [Samsung TV](#samsung-tv-tizen). |
 
-Web targets are not declared by default because Compose Multiplatform for web is still Beta. To add
-one, declare the target in the library's `build.gradle.kts`; no source changes are needed:
+Apple x86_64 (`iosX64`, `tvosX64`) is not available: Compose Multiplatform 1.11+ ships no Apple
+x86_64 artifacts at all, so there is nothing to link an Intel-Mac simulator build against.
+
+### Apple TV (tvOS)
+
+The whole library compiles for tvOS unmodified, and the full shared test suite runs on a tvOS
+simulator in CI. Fixed focus, per-row focus memory, key-repeat throttling and the end-of-row
+highlight walk were verified on an Apple TV 4K simulator and on real Apple TV HD hardware.
+
+JetBrains does not publish tvOS artifacts for Compose Multiplatform itself, so **your build needs a
+settings plugin** that supplies them. Add it to `settings.gradle.kts`, directly after
+`pluginManagement { }`:
+
+```kotlin
+plugins {
+    id("dev.sajidali.compose-tvos") version "1.4.2"
+}
+```
+
+It maps the official `org.jetbrains.compose.*` coordinates onto tvOS builds published by the
+[`sajidalidev/compose-multiplatform-core`](https://github.com/sajidalidev/compose-multiplatform-core)
+fork, at resolution time and for tvOS configurations only — Android, desktop, iOS and wasmJs keep
+resolving JetBrains' own artifacts.
+
+This library's own published metadata stays on the official `org.jetbrains.compose.*` coordinates,
+so depending on it never forces the fork on you: the substitution happens in your build, under your
+control, and disappears the day JetBrains ships tvOS themselves.
+
+Leave `composeTvos { strictMode }` off. It reports false positives on iOS-only platform leaves
+(`*-uikitarm64`, `*-uikitsimarm64`) and on conflict-resolution losers, failing builds whose linked
+graph is fine.
+
+### Samsung TV (Tizen)
+
+A Tizen TV app is a web app — HTML, JS and WebAssembly wrapped in a `config.xml` widget manifest —
+so Tizen support is simply the `wasmJs` target, with nothing Tizen-specific in this library:
 
 ```kotlin
 kotlin {
+    @OptIn(ExperimentalWasmDsl::class)
     wasmJs { browser() }
 }
 ```
+
+Compose Multiplatform's web target compiles to **WebAssembly GC**, which shipped in Chromium 119,
+so the TV's web engine decides whether it runs at all. Per Samsung's Web Engine Specifications:
+
+| Tizen | TV model year | Chromium | Runs Compose web |
+|---|---|---|---|
+| 10.0 | 2026 | M130 | Yes |
+| 9.0 | 2025 | M120 | Yes |
+| 8.0 | 2024 | M108 | **No** — predates WasmGC |
+
+Set `required_version="9.0"` in your Tizen `config.xml` so older TVs never install a build they
+cannot run.
 
 ---
 
@@ -74,7 +122,7 @@ Published to Maven Central, so `mavenCentral()` in your repositories is all the 
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("io.github.souravnoobcoder:roku-focus-list:2.0.0")
+            implementation("io.github.souravnoobcoder:roku-focus-list:2.2.0")
         }
     }
 }
@@ -87,7 +135,7 @@ for `commonMain`, the AAR for Android, a jar for desktop, klibs for iOS.
 
 ```kotlin
 dependencies {
-    implementation("io.github.souravnoobcoder:roku-focus-list:2.0.0")
+    implementation("io.github.souravnoobcoder:roku-focus-list:2.2.0")
 }
 ```
 
@@ -588,6 +636,61 @@ RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 
 ---
 
+## Two things that will bite you
+
+### Don't put `Modifier.clickable` on item content
+
+`clickable` makes the node focusable, so it competes with the list's own single focus target: the
+highlight stops tracking the selection. This library deliberately keeps one focusable per list —
+that is what makes fixed focus work — so handle taps without adding a focus target:
+
+```kotlin
+// Breaks focus tracking:
+Modifier.clickable { open(movie) }
+
+// Works — taps without a focus target:
+Modifier.pointerInput(movie.id) {
+    detectTapGestures { open(movie) }
+}
+```
+
+D-pad activation is already delivered through `onItemClicked`; the gesture above is only for
+touch and mouse.
+
+### Check `LocalDensity` on real TV hardware
+
+TV platforms disagree about density, and the wrong one silently halves your layout:
+
+| Device | Reported density | 1920×1080 screen becomes |
+|---|---|---|
+| Apple TV HD (real hardware) | 1.0 | 1920×1080 **dp** |
+| Apple TV 4K simulator | 2.0 | 960×540 dp |
+| Android TV @ 320 dpi | 2.0 | 960×540 dp |
+| Desktop browser / Tizen | 1.0 | 1920×1080 dp |
+
+At density 1.0 every card is half its intended physical size and roughly twice as many rows fit on
+screen — which also doubles the per-frame work. On a real Apple TV HD that measured **~28 fps**
+during vertical scrolls (about 10 frames per 345 ms scroll), which reads as a jump rather than a
+scroll.
+
+Pin a design density instead of trusting the platform's:
+
+```kotlin
+BoxWithConstraints {
+    val designDensity = constraints.maxWidth / 960f
+    CompositionLocalProvider(
+        LocalDensity provides Density(designDensity, fontScale = 1f)
+    ) {
+        HomeScreen()
+    }
+}
+```
+
+This is a consumer concern rather than a library bug, but it lands hardest on exactly this
+library's users.
+
+---
+
 ## API Reference
 
 ### Components
@@ -669,10 +772,15 @@ which is why no platform-specific source set is needed.
   still works there.
 - **Haptic feedback is a no-op on desktop and web.** `hapticFeedback = true` is harmless; there is
   simply no haptic hardware.
-- **iOS compiles but has not been exercised at runtime.** The klibs build for all three iOS targets.
-  Compose Multiplatform does not support tvOS, so there is no Apple TV target.
-- **Linking an iOS framework requires macOS.** Compiling the klibs works from any host, including
+- **iOS compiles but has not been exercised at runtime.** The klibs build for both iOS targets.
+- **tvOS needs the `compose-tvos` settings plugin in your build**, because JetBrains publishes no
+  tvOS artifacts for Compose Multiplatform. See [Apple TV](#apple-tv-tvos).
+- **No Apple x86_64.** Compose Multiplatform 1.11+ dropped `iosX64` / `tvosX64` entirely, so Intel-Mac
+  simulator builds are not possible.
+- **Linking an Apple framework requires macOS.** Compiling the klibs works from any host, including
   Windows, but producing an `.xcframework` needs Xcode.
+- **Tizen 8.0 (2024 TVs) cannot run the wasm build at all** — its Chromium M108 predates WebAssembly
+  GC. See [Samsung TV](#samsung-tv-tizen).
 - **`headerHeight` in `RokuLazyColumn`'s `row { }` must match the header's real rendered height**,
   and `customRow`'s `height` must match its content, or the vertical highlight lands at the wrong Y.
 - **Layout is left-to-right only.** `RokuFocusEscape.start` / `.end` map to LEFT / RIGHT; nothing
@@ -683,9 +791,11 @@ which is why no platform-specific source set is needed.
 
 ## Requirements
 
-- **Kotlin** 2.2.x (built with 2.2.21)
-- **Compose Multiplatform** 1.10.3, or **Jetpack Compose** 1.10.5 / BOM 2026.03.00 for Android-only projects
-- **minSdk** 24 (Android 7.0+)
+- **Kotlin** 2.4.x (built with 2.4.10)
+- **Compose Multiplatform** 1.12.0, or **Jetpack Compose** 1.12.0 / BOM 2026.08.00 for Android-only projects
+- **AGP** 9.1+ and **compileSdk** 37 for Android consumers — required by Compose Multiplatform 1.12.0's
+  Android artifacts, which declare it in their aar-metadata
+- **minSdk** 23 (Android 6.0+)
 - **JDK** 11+ for desktop consumers
 - **No Material dependency** — works with any design system
 
@@ -707,7 +817,7 @@ which is why no platform-specific source set is needed.
 ```
 
 ```bash
-./gradlew :roku-focus-list:compileAndroidMain :roku-focus-list:compileKotlinDesktop :roku-focus-list:compileKotlinIosArm64 :roku-focus-list:compileKotlinIosX64 :roku-focus-list:compileKotlinIosSimulatorArm64
+./gradlew :roku-focus-list:compileAndroidMain :roku-focus-list:compileKotlinDesktop :roku-focus-list:compileKotlinIosArm64 :roku-focus-list:compileKotlinIosSimulatorArm64 :roku-focus-list:compileKotlinTvosArm64 :roku-focus-list:compileKotlinTvosSimulatorArm64 :roku-focus-list:compileKotlinWasmJs
 ```
 
 ```bash

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-09-14
+
+### Added
+
+- **Apple TV (`tvosArm64`, `tvosSimulatorArm64`).** The library compiles for tvOS with no source changes at all, and the full shared test suite runs on a tvOS simulator in CI alongside desktop. Fixed focus, per-row focus memory, key-repeat throttling and the end-of-row highlight walk were verified on an Apple TV 4K simulator and on real Apple TV HD hardware. JetBrains publishes no tvOS artifacts for Compose Multiplatform, so a consumer building for Apple TV applies the `dev.sajidali.compose-tvos` settings plugin, which maps the official coordinates onto the `sajidalidev/compose-multiplatform-core` fork's tvOS builds. This library's own published metadata stays on `org.jetbrains.compose.*`, so depending on it never forces the fork on anyone — the substitution happens in the consumer's build and disappears the day JetBrains ships tvOS themselves.
+
+- **Web / Samsung Tizen TV (`wasmJs`).** A Tizen TV app is a web app, so Tizen support is the `wasmJs` target with nothing Tizen-specific in the library. Compose Multiplatform's web target compiles to WebAssembly GC, so Tizen 9.0 (2025 TVs, Chromium M120) and 10.0 (2026 TVs, M130) can run it and Tizen 8.0 (2024 TVs, M108) cannot; consumers should set `required_version="9.0"` in their Tizen `config.xml`. The README carries the compatibility table.
+
+- README: the two traps that cost the most debugging time when consuming this library — `Modifier.clickable` on item content silently breaking focus tracking (it adds a second focus target; use `pointerInput`/`detectTapGestures` instead), and `LocalDensity` differing across TV hardware (a real Apple TV HD reports 1.0 for a 1080p screen, laying the app out on a 1920×1080 dp canvas at roughly half the intended size and about double the per-frame work).
+
+### Changed
+
+- Toolchain: Kotlin 2.2.21 → 2.4.10, Compose Multiplatform 1.10.3 → 1.12.0, AGP 9.0.1 → 9.2.1, Gradle 9.1.0 → 9.4.1, and the demo app's Compose BOM 2026.03.00 → 2026.08.00 (which pins Jetpack Compose 1.12.0, exactly what Compose Multiplatform 1.12.0 resolves to on Android — these must not desync). The bump is not cosmetic: the fork publishes tvOS klibs for Compose Multiplatform 1.12.0 only, and nothing for 1.10.3.
+
+- CI runs the tvOS simulator test suite and the wasm compile on every PR, so multi-target claims are carried by CI rather than by local runs.
+
+### BREAKING
+
+- **`iosX64` is gone.** Compose Multiplatform 1.11+ ships no Apple x86_64 artifacts at all, so the target has nothing to link against. Apple silicon Macs are unaffected — they use `iosSimulatorArm64`. Only a build targeting an Intel-Mac simulator is affected, and it cannot be fixed by pinning an older version of this library alone.
+
+- **Android consumers need AGP 9.1+ and compileSdk 37.** Compose Multiplatform 1.12.0's Android artifacts declare that minimum in their aar-metadata, so an older AGP or compileSdk fails the manifest merge rather than degrading gracefully.
+
 ## [2.1.0] - 2026-08-20
 
 ### Changed

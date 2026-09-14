@@ -1,8 +1,9 @@
 name: CI
 
 # Every PR proves the library still works where it is developed (desktop JVM: unit tests plus
-# headless Compose UI tests) and still compiles for iOS. macOS runner because the iOS compile
-# needs one anyway, so a single job covers both.
+# headless Compose UI tests), still compiles for every published target, and still passes the
+# shared test suite on a tvOS simulator. macOS runner because the Apple compiles need one anyway,
+# so a single job covers all of it.
 on:
   pull_request:
   push:
@@ -21,8 +22,14 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      - name: Desktop tests and iOS compile
-        run: ./gradlew :roku-focus-list:desktopTest :roku-focus-list:compileKotlinIosSimulatorArm64
+      - name: Desktop tests, Apple + wasm compiles, tvOS simulator tests
+        run: |
+          ./gradlew \
+            :roku-focus-list:desktopTest \
+            :roku-focus-list:compileKotlinIosSimulatorArm64 \
+            :roku-focus-list:compileKotlinTvosSimulatorArm64 \
+            :roku-focus-list:compileKotlinWasmJs \
+            :roku-focus-list:tvosSimulatorArm64Test
 
       - name: Upload test reports
         if: failure()
