@@ -29,8 +29,5 @@ kotlin {
             implementation(libs.compose.mp.animation)
             implementation(libs.compose.mp.ui.tooling.preview)
         }
-        commonTest.dependencies {
-            implementation(kotlin("test"))
-        }
     }
 }

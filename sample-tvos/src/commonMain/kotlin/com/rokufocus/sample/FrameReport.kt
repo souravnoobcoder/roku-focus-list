@@ -23,7 +23,7 @@ internal fun rememberFrameReport(trigger: Int): String {
     var report by remember { mutableStateOf("") }
     LaunchedEffect(trigger) {
         if (trigger == 0) return@LaunchedEffect
-        val vsyncNanos = 1_000_000_000L / TvRemotePan.displayRefreshHz.coerceAtLeast(1)
+        val vsyncNanos = 1_000_000_000L / TvDisplay.refreshHz.coerceAtLeast(1)
         val missedThresholdNanos = vsyncNanos * 3 / 2
         val start = withFrameNanos { it }
         var previous = start
@@ -42,7 +42,7 @@ internal fun rememberFrameReport(trigger: Int): String {
         val seconds = (previous - start) / 1_000_000_000.0
         val fps = (frames / seconds).roundToInt()
         val worstMs = (worstGap / 1_000_000.0).roundToInt()
-        val hz = TvRemotePan.displayRefreshHz
+        val hz = TvDisplay.refreshHz
         report = "$fps fps on a $hz Hz panel · worst frame $worstMs ms · $missedVsyncs missed vsync"
         println("[roku] frames=$frames over ${(seconds * 1000).roundToInt()}ms fps=$fps hz=$hz worst=${worstMs}ms missed=$missedVsyncs")
     }
