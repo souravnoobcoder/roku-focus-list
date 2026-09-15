@@ -82,24 +82,15 @@ fun Modifier.rokuKeyHandler(
 }
 
 /**
- * Applies one velocity-scaled swipe to a row, as a single coalesced move, and reports whether the
+ * Applies one multi-step move to a row, as a single coalesced move, and reports whether the
  * gesture was consumed.
  *
  * This is the gesture counterpart to [Modifier.rokuKeyHandler], and the reason it exists rather
  * than leaving consumers to call [RokuFocusListState.moveBy] themselves is the edge policy: a
  * multi-step move that runs out of row has to consume what it can and then apply
- * [RokuFocusConfig.focusEscape] **once**, never once per step. Wire a platform gesture to it by
- * turning the gesture's velocity into a step count with [stepsForVelocity] and negating it for a
- * backward swipe:
- *
- * ```
- * val steps = config.stepsForVelocity(velocity)
- * val consumed = rokuMoveBy(state, config, if (forward) steps else -steps, onSelected = ::onSelect)
- * ```
- *
- * The library never touches the platform's gesture APIs itself — translating a swipe into a
- * velocity is the host's job, and keeping it that way is what lets this work identically on tvOS,
- * Android TV, desktop and the web.
+ * [RokuFocusConfig.focusEscape] **once**, never once per step. [RokuTouchpad] drives the built-in
+ * components through this family; a host with its own input source (a trackpad, a wheel, a
+ * gamepad stick) calls it directly with a negative count for a backward move.
  *
  * @param steps How far to move; negative travels toward the start. 0 does nothing.
  * @param orientation Which pair of [RokuFocusEscape] edges a clipped move is judged against.

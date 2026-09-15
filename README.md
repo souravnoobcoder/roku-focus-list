@@ -86,11 +86,13 @@ Leave `composeTvos { strictMode }` off. It reports false positives on iOS-only p
 (`*-uikitarm64`, `*-uikitsimarm64`) and on conflict-resolution losers, failing builds whose linked
 graph is fine.
 
-Two more things the fork decides for you, both covered in detail further down: it turns every
-touchpad swipe into a single D-pad key at lift-off (see [Touchpad remotes](#touchpad-remotes-multi-step-moves-and-swipe-velocity)),
-and on a real Apple TV HD it lays the scene out at density 1.0 (see
-[Check `LocalDensity`](#check-localdensity-on-real-tv-hardware)). `sample-tvos/` is a runnable
-Apple TV app that handles both.
+The Siri Remote touchpad is read by the library: provide a `RokuTouchpad` and call
+`attachSiriRemote(view)` on the Compose host view (see [Touchpad remotes](#touchpad-remotes)), and
+every component follows the thumb like the native focus engine. Two more things the fork decides
+for you, both covered further down: it turns every touchpad swipe into a single D-pad key at
+lift-off, which `attachSiriRemote` suppresses, and on a real Apple TV HD it lays the scene out at
+density 1.0 (see [Check `LocalDensity`](#check-localdensity-on-real-tv-hardware)). `sample-tvos/`
+is a runnable Apple TV app that shows both.
 
 ### Samsung TV (Tizen)
 
@@ -541,7 +543,7 @@ was. `Saver` and `rememberRokuGridState` handle restoration.
 
 Touchpad input goes through `rokuMoveColumnsBy(gridState, …)` and `rokuMoveRowsBy(gridState, …)`,
 or `gridState.moveColumnsBy` / `moveRowsBy` / `moveBy` (reading order) directly — see
-[Touchpad remotes](#touchpad-remotes-multi-step-moves-and-swipe-velocity).
+[Touchpad remotes](#touchpad-remotes).
 
 ---
 
@@ -655,8 +657,7 @@ val config = RokuFocusConfig(
     keyRepeatFastDelayMs = 50L,     // fast speed once accelerated
     wrapAround = true,              // wrap from last to first
     hapticFeedback = true,          // vibrate at boundaries
-    focusEscape = RokuFocusEscape.All,
-    swipeSensitivity = 1.5f         // touchpad flicks travel further (see "Touchpad remotes")
+    focusEscape = RokuFocusEscape.All
 )
 
 RokuLazyRow(config = config) { /* items */ }
@@ -671,10 +672,9 @@ RokuLazyRow(config = config) { /* items */ }
 | `wrapAround` | `Boolean` | `false` | Wrap from last item to first and vice versa |
 | `hapticFeedback` | `Boolean` | `true` | Vibrate on boundary hit. No-op on desktop and web. |
 | `focusEscape` | `RokuFocusEscape` | `All` | Per-edge control over letting focus leave the list |
-| `swipeVelocityThreshold` | `Float` | `500` | Velocity at or below which a swipe moves one item. Same unit you pass to `stepsForVelocity`. |
-| `swipeMaxSteps` | `Int` | `5` | Cap on the items one swipe can move |
-| `swipeSensitivity` | `Float` | `1` | Scales the curve above the threshold. The one swipe knob most apps touch. |
-| `swipeStepsForVelocity` | `((Float) -> Int)?` | `null` | Full replacement for the built-in curve, cap included |
+
+Touchpad pacing and the focus-movement hint are configured on `RokuTouchpadConfig`, not here — see
+[Touchpad remotes](#touchpad-remotes).
 
 Built-in animation presets:
 
@@ -686,27 +686,81 @@ RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 
 ---
 
-## Touchpad remotes: multi-step moves and swipe velocity
+## Touchpad remotes
 
-A Siri Remote or an Android TV touch remote produces swipes with a velocity, not discrete presses.
-Calling `moveNext()` N times for one swipe gives you N selection changes, N highlight animations, N
-scroll animations and N `onItemSelected` callbacks — and every prefetch or saved-position write
-hanging off that callback fires N times too. The library coalesces this for you:
+A Siri Remote produces a thumb that moves, not discrete presses. The library reads it for you:
+provide one `RokuTouchpad` at the root and every `RokuLazyRow`, `RokuLazyColumn` and
+`RokuFocusGrid` below follows the thumb the way the native tvOS focus engine does. On tvOS the whole
+wiring is:
+
+```kotlin
+val touchpad = RokuTouchpad()
+ComposeUIViewController {
+    CompositionLocalProvider(LocalRokuTouchpad provides touchpad) { App() }
+}.also { touchpad.attachSiriRemote(it.view) }
+```
+
+What every component then does, with no per-screen code:
+
+- **Focus follows the thumb, and only the thumb.** Each 0.65 of an item pitch of travel moves one
+  item (one row pitch up or down), coalesced into a single move when travel arrives faster than one
+  item per report. Nothing moves once the thumb lifts — there is no coast.
+- **A fast thumb covers more ground** through a smooth velocity gain (×1 up to 2,500 pt/s, ×2 from
+  12,000), so a hard swipe crosses about twice the items of a careful one.
+- **Small movement is never lost.** Travel short of a full step leans the focused card toward the
+  thumb — up to 14 dp, tilting 6° and lifting 4 %, with the highlight travelling a little further
+  than the card for depth — and springs it back with a bounce when the thumb lifts. This is the
+  focus-movement hint that tells the user a small swipe was felt. At the end of a row the lean pins
+  at full pull, pushing further is dropped, and one step of travel back moves back.
+- **Swipes and keys are the same move.** `onItemSelected`, `wrapAround` and `focusEscape` behave
+  identically for both, and a `customRow` receives each step as a `RokuNavKey.Left` / `Right`.
+
+Tune it with `RokuTouchpadConfig`. Distances and speeds are in the units your host reports — UIKit
+points on tvOS, where a full swipe across the pad is 1,000–1,800 pt and a relaxed flick lifts off at
+4,000–8,000 pt/s:
+
+| Parameter | Default | Description |
+|---|---|---|
+| `itemStepFraction` | `0.65` | Travel per item along a row, in item pitches |
+| `rowStepFraction` | `1` | Travel per row up or down, in row pitches |
+| `axisLock` | `16` | Travel before a contact commits to an axis and can move; below it the card only leans |
+| `gainStartVelocity` / `gainMaxVelocity` | `2500` / `12000` | Thumb speeds between which travel counts ×1 → `maxGain`, smoothly |
+| `maxGain` | `2` | Travel multiplier for a fast thumb |
+| `hintTravel` | `14.dp` | Lean of the focused card at a full step of pending travel (square-root curve) |
+| `hintTiltDegrees` | `6` | Tilt toward the thumb at a full step |
+| `hintScale` | `1.04` | Lift of the card at a full step; `1` disables it |
+| `hintHighlightParallax` | `1.35` | How much further than the card the highlight leans; `1` moves them as one |
+| `hintReleaseSpec` | `spring(0.55, 450)` | How the lean springs back when the thumb lifts |
+
+Other platforms feed the same object: call `panBegan()`, `panChanged(dx, dy, velocityX, velocityY)`
+and `panEnded()` from whatever reads the device, and set `pxPerUnit` if you report anything other
+than pixels. Without a `RokuTouchpad` in the composition none of this exists at runtime — no layer,
+no coroutine, no key interception — so a D-pad TV runs exactly the code it ran before.
+
+### The moves underneath
+
+The touchpad drives the components through coalesced multi-step moves you can also call yourself,
+for input that arrives some other way (a trackpad, a wheel, a gamepad stick). Calling `moveNext()`
+N times for one gesture gives you N selection changes, N highlight animations, N scroll animations
+and N `onItemSelected` callbacks — and every prefetch or saved-position write hanging off that
+callback fires N times too. These do it once:
 
 ```kotlin
 rowState.moveBy(3)           // one selection change, one animation, one callback
 rowState.moveBy(-2)          // negative steps travel toward the start
 columnState.moveRowsBy(2)    // vertical equivalent; skips rows with nothing to select
 columnState.moveItemsBy(3)   // within the column's active row — no row state needed
+gridState.moveColumnsBy(2)   // along a grid row; moveRowsBy keeps the column
 
 // Edge-aware variants that also apply focusEscape / onBoundaryHit exactly once per move:
 rokuMoveBy(rowState, config, steps = 3, onSelected = { index -> /* ... */ })
 rokuMoveRowsBy(columnState, config, steps = -1)
 rokuMoveItemsBy(columnState, config, steps = 3, onSelected = { rowIndex, itemIndex -> /* ... */ })
+rokuMoveColumnsBy(gridState, config, steps = 2)
 ```
 
 Every entry point has a handle for this. A `RokuLazyColumn` exposes the selected rail's state as
-`columnState.activeRowState`, so horizontal swipes go through the column state and the `row { }`
+`columnState.activeRowState`, so horizontal moves go through the column state and the `row { }`
 DSL — which never hands out its rows' states — works exactly like the state-based overload. A
 standalone DSL `RokuLazyRow` takes an optional hoisted `state` for the same reason, while keeping
 its auto-measured item width.
@@ -715,37 +769,20 @@ Moves clamp at the ends of a row — asking for more steps than remain lands on 
 `wrapAround` the move wraps only when the selection is *already* parked on the edge being pushed,
 mirroring single steps. `moveBy(1)` and `moveNext()` behave identically; `moveNext` is implemented
 on top of the same core, not duplicated. A multi-step move also resets the key-repeat acceleration
-streak, so a swipe landing mid-repeat cannot compound into a runaway scroll.
+streak, so a swipe landing mid-repeat cannot compound into a runaway scroll. Chained moves scroll
+as one continuous motion: the scroll animation carries its velocity across retargets instead of
+restarting from rest on each item.
 
-To turn a velocity into a step count, `RokuFocusConfig` has a built-in curve:
+### Apple TV and the Compose tvOS fork
 
-```kotlin
-val steps = config.stepsForVelocity(velocityPointsPerSecond)   // 1 at or below the threshold,
-                                                               // grows linearly above it, capped
-rokuMoveBy(rowState, config, if (velocity > 0) steps else -steps)
-```
-
-The library stays **input-agnostic**: it never sees a gesture. Recognising the swipe, and deciding
-how to pace it, is the host's job. Two things to know before you wire one up:
-
-**Apple TV and the Compose tvOS fork.** The fork already turns every touchpad swipe into one D-pad
-key at lift-off — a slow drag is one step, a long flick is one step, and there is no velocity to
-read. If you add your own `UIPanGestureRecognizer` on the Compose host view, leave
-`cancelsTouchesInView = true` (the default): recognising the pan cancels the fork's pending touch,
-so the swipe is not applied twice. Clicks and D-pad ring presses are `UIPress` events and are
-unaffected.
-
-**What "smooth like the system apps" actually is.** The native tvOS focus engine does not jump N
-items at lift-off, and it does not coast after it either. Focus follows the thumb while it is on
-the pad, a fast thumb covers more ground than a slow one, movement stops the moment the thumb
-lifts, and travel too small to change focus leans the focused card toward the thumb and springs it
-back — the focus-movement hint that tells the user a small swipe was felt. `sample-tvos/`
-reproduces that model on top of this library: drag → `rokuMoveBy` per item-width of travel
-(coalesced when travel arrives faster than one item per report), velocity → a smooth gain on that
-travel rather than extra steps, and the hint driven from the sub-step remainder. `stepsForVelocity`
-is for input that arrives as a single fling event with no drag phase to track. Whichever pacing you
-choose, chained moves scroll as one continuous motion: the library's scroll animation carries its
-velocity across retargets instead of restarting from rest on each item.
+The fork already turns every touchpad swipe into one D-pad key at lift-off — a slow drag is one
+step, a long flick is one step, and there is no velocity to read. `attachSiriRemote` installs a
+`UIPanGestureRecognizer` that cancels the underlying touch once it recognises, so the fork's key is
+never dispatched and the swipe is not applied twice; clicks and D-pad ring presses are `UIPress`
+events and are unaffected. A flick so short that the pan only recognises as the touch ends can
+still leak that one key (seen twice in ~130 gestures on real hardware), so the components drop any
+direction key arriving within 120 ms of touch-driven movement. If you install a pan recogniser of
+your own instead, leave `cancelsTouchesInView = true`.
 
 ---
 
@@ -817,7 +854,8 @@ library's users.
 | `RokuLazyColumnScope.customRow` | Anything else, with LEFT/RIGHT/ENTER delegated to it. |
 | `DefaultFocusHighlight` | Default white rounded-border highlight. `BoxScope` extension, fully replaceable. |
 | `Modifier.rokuKeyHandler` | Low-level D-pad handler, for wiring your own container. |
-| `rokuMoveBy` / `rokuMoveRowsBy` / `rokuMoveItemsBy` / `rokuMoveColumnsBy` | Edge-aware multi-step moves for touchpad input: a row, a column's rows, a column's active row, a grid's row and rows. Escape policy applied once per move. |
+| `rokuMoveBy` / `rokuMoveRowsBy` / `rokuMoveItemsBy` / `rokuMoveColumnsBy` | Edge-aware multi-step moves: a row, a column's rows, a column's active row, a grid's row and rows. Escape policy applied once per move. |
+| `RokuTouchpad.attachSiriRemote` | tvOS only. Installs the pan recogniser that feeds a `RokuTouchpad` from the Siri Remote; returns an attachment with `detach()`. |
 
 ### Types
 
@@ -827,6 +865,8 @@ library's users.
 | `RokuFocusListState` | Which item of a row is selected; `moveBy` for coalesced multi-step moves. |
 | `RokuGridState` | Which cell of a grid is selected (linear index; `selectedRow` / `selectedColumn` derived); `moveColumnsBy` / `moveRowsBy` / `moveBy`; owns `columns` and the focus mode. |
 | `RokuFocusConfig` | Navigation behaviour. |
+| `RokuTouchpad` | A touchpad remote: `panBegan` / `panChanged` / `panEnded` in, thumb-following moves and the focus-movement hint out. Provided through `LocalRokuTouchpad`. |
+| `RokuTouchpadConfig` | Pacing (step fractions, axis lock, velocity gain) and hint tuning (travel, tilt, lift, parallax, release spring). |
 | `RokuFocusMode` | Per-axis `Static` (fixed slot, content scrolls) vs `Floating` (highlight walks, scrolls at window edges). |
 | `RokuFocusEscape` | Per-edge focus escape. |
 | `RokuHighlightScope` | Receiver of `focusHighlight`: `BoxScope` + `rowIndex`, `itemIndex`. |
@@ -837,10 +877,10 @@ library's users.
 
 | Callback | Available on | Description |
 |---|---|---|
-| `onItemSelected` | Row, Column | Fires when the selected index changes. |
-| `onItemClicked` | Row, Column | Fires on Enter / DpadCenter press. |
-| `onFocusEnter` | Row, Column | Fires when the list gains focus. |
-| `onFocusExit` | Row, Column | Fires when the list loses focus. |
+| `onItemSelected` | Row, Column, Grid | Fires when the selected index changes — once per move, whether a key or a swipe caused it. |
+| `onItemClicked` | Row, Column, Grid | Fires on Enter / DpadCenter press. |
+| `onFocusEnter` | Row, Column, Grid | Fires when the list gains focus. |
+| `onFocusExit` | Row, Column, Grid | Fires when the list loses focus. |
 
 ---
 
@@ -921,9 +961,9 @@ which is why no platform-specific source set is needed.
 
 | Module | What it is |
 |---|---|
-| `roku-focus-list/` | The library. All code in `src/commonMain/kotlin`, tests in `src/commonTest/kotlin`. |
+| `roku-focus-list/` | The library. All code in `src/commonMain/kotlin` except the Siri Remote recogniser in `src/tvosMain/kotlin`; tests in `src/commonTest/kotlin`. |
 | `app/` | Android TV demo app: 100 rows, 6 card types, 7 demo screens. Run on a TV emulator or device. |
-| `sample-tvos/` | Runnable Apple TV sample: Siri Remote touchpad → drag tracking with velocity gain and the focus-movement hint, on top of `rokuMoveBy` / `rokuMoveRowsBy`, with an on-screen gesture and frame-timing readout. Xcode project in `sample-tvos/tvosApp/`; build in Release for a fair read on smoothness. |
+| `sample-tvos/` | Runnable Apple TV sample: the four layouts in both focus modes, driven by `RokuTouchpad` with the one-line tvOS wiring, plus an on-screen selection and frame-timing readout. Xcode project in `sample-tvos/tvosApp/`; build in Release for a fair read on smoothness. |
 | `consumer-kmp/` | Verification module — a KMP library whose `commonMain` uses `RokuLazyRow` / `RokuLazyColumn`. |
 | `verification/published-consumer/` | Standalone Gradle build that resolves the **published** artifact from `mavenLocal` in `commonMain`. |
 

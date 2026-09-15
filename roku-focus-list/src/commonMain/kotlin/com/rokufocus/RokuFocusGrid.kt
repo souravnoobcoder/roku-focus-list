@@ -2,6 +2,7 @@ package com.rokufocus
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
@@ -73,6 +75,7 @@ internal fun RokuFocusGridImpl(
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val hapticFeedback = LocalHapticFeedback.current
+    val touchpad = LocalRokuTouchpad.current
 
     DisposableEffect(state) {
         onDispose { state.hasFocus = false }
@@ -104,6 +107,7 @@ internal fun RokuFocusGridImpl(
                     liveRegion = LiveRegionMode.Polite
                 }
             }
+            .rokuTouchpadKeyGuard(touchpad)
             .rokuGridKeyHandler(state, config, onItemSelected, onItemClicked, onBoundaryHit)
     ) {
         val startPadPx = with(density) { contentPadding.calculateLeftPadding(layoutDirection).toPx() }
@@ -160,6 +164,56 @@ internal fun RokuFocusGridImpl(
         val animatedX by animateFloatAsState(targetX, config.highlightAnimationSpec, label = "roku_grid_hl_x")
         val animatedY by animateFloatAsState(targetY, config.highlightAnimationSpec, label = "roku_grid_hl_y")
 
+        // Touchpad: along the row for horizontal travel, whole rows for vertical, with the focused
+        // cell and the highlight leaning toward pending travel. Nothing here exists without one.
+        val touchLean = rememberRokuTouchLean(touchpad, state.hasFocus)
+        val leanStyle = rememberRokuTouchLeanStyle(touchpad)
+        if (touchpad != null) {
+            val cellPitchPx = cellWidthPx + itemSpacingPx
+            val target = remember(state, config, cellPitchPx, rowPitchPx, onItemSelected, onBoundaryHit) {
+                GridTouchTarget(state, config, cellPitchPx, rowPitchPx, onItemSelected, onBoundaryHit)
+            }
+            BindRokuTouchpad(touchpad, target, state.hasFocus)
+        }
+        val focusedItemModifier = remember(touchLean, leanStyle) {
+            if (touchLean != null && leanStyle != null) Modifier.rokuTouchLean(touchLean, leanStyle) else Modifier
+        }
+
+        // Remembered so the grid receives the same content lambda on every selection
+        // recomposition; selection is read back per cell through derivedStateOf.
+        val cells: LazyGridScope.() -> Unit = remember(
+            state, columns, itemHeight, itemKey, itemContentDescription, itemContent, focusedItemModifier
+        ) {
+            {
+                items(count = state.itemCount, key = itemKey ?: { it }) { index ->
+                    // Derived per cell for the same reason as RokuRowContent: a move recomposes
+                    // the two cells whose value flipped, not every visible cell.
+                    val isSelected by remember(index) { derivedStateOf { index == state.selectedIndex } }
+                    val showAsFocused by remember(index) {
+                        derivedStateOf { index == state.selectedIndex && state.hasFocus }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .height(itemHeight)
+                            .zIndex(if (isSelected) 1f else 0f)
+                            .then(if (showAsFocused) focusedItemModifier else Modifier)
+                            .semantics {
+                                collectionItemInfo = CollectionItemInfo(
+                                    rowIndex = index / columns,
+                                    rowSpan = 1,
+                                    columnIndex = index % columns,
+                                    columnSpan = 1
+                                )
+                                selected = isSelected
+                                itemContentDescription?.invoke(index)?.let { contentDescription = it }
+                            }
+                    ) {
+                        itemContent(index, showAsFocused)
+                    }
+                }
+            }
+        }
+
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
             state = gridState,
@@ -167,40 +221,18 @@ internal fun RokuFocusGridImpl(
             contentPadding = contentPadding,
             horizontalArrangement = Arrangement.spacedBy(itemSpacing),
             verticalArrangement = Arrangement.spacedBy(rowSpacing),
-            userScrollEnabled = false
-        ) {
-            items(count = state.itemCount, key = itemKey ?: { it }) { index ->
-                // Derived per cell for the same reason as RokuRowContent: a move recomposes the
-                // two cells whose value flipped, not every visible cell.
-                val isSelected by remember(index) { derivedStateOf { index == state.selectedIndex } }
-                val showAsFocused by remember(index) {
-                    derivedStateOf { index == state.selectedIndex && state.hasFocus }
-                }
-                Box(
-                    modifier = Modifier
-                        .height(itemHeight)
-                        .zIndex(if (isSelected) 1f else 0f)
-                        .semantics {
-                            collectionItemInfo = CollectionItemInfo(
-                                rowIndex = index / columns,
-                                rowSpan = 1,
-                                columnIndex = index % columns,
-                                columnSpan = 1
-                            )
-                            selected = isSelected
-                            itemContentDescription?.invoke(index)?.let { contentDescription = it }
-                        }
-                ) {
-                    itemContent(index, showAsFocused)
-                }
-            }
-        }
+            userScrollEnabled = false,
+            content = cells
+        )
 
         Box(
             modifier = Modifier
                 .graphicsLayer {
                     translationX = animatedX
                     translationY = animatedY
+                    if (touchLean != null && leanStyle != null) {
+                        applyTouchLean(touchLean.value, leanStyle, leanStyle.highlightParallax)
+                    }
                 }
                 .layout { measurable, _ ->
                     val w = cellWidthPx.roundToInt().coerceAtLeast(0)
@@ -215,5 +247,37 @@ internal fun RokuFocusGridImpl(
                 itemIndex = state.selectedIndex
             ).focusHighlight(state.hasFocus)
         }
+    }
+}
+
+/** A grid: along the row for horizontal travel, whole rows for vertical, both column-aware. */
+private class GridTouchTarget(
+    private val state: RokuGridState,
+    private val config: RokuFocusConfig,
+    private val cellPitchPx: Float,
+    private val rowPitchPx: Float,
+    private val onItemSelected: ((index: Int) -> Unit)?,
+    private val onBoundaryHit: (() -> Unit)?
+) : RokuTouchTarget {
+
+    override fun stepPx(orientation: Orientation): Float =
+        if (orientation == Orientation.Horizontal) cellPitchPx else rowPitchPx
+
+    override fun moveItems(steps: Int): Boolean {
+        var moved = false
+        rokuMoveColumnsBy(state, config, steps, onSelected = { index ->
+            moved = true
+            onItemSelected?.invoke(index)
+        }, onBoundaryHit = onBoundaryHit)
+        return moved
+    }
+
+    override fun moveRows(steps: Int): Boolean {
+        var moved = false
+        rokuMoveRowsBy(state, config, steps, onSelected = { index ->
+            moved = true
+            onItemSelected?.invoke(index)
+        }, onBoundaryHit = onBoundaryHit)
+        return moved
     }
 }

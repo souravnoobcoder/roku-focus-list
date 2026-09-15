@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
  * @param rowFocused Read per item, inside a `derivedStateOf`, and merged into the `isFocused`
  *   value handed to [itemContent]. A lambda rather than a Boolean so a row focus flip invalidates
  *   only the selected item instead of replacing this composable's parameters.
+ * @param focusedItemModifier Applied to the wrapper of the item shown as focused and to no other,
+ *   so a touchpad lean costs the row one layer, on one card, and nothing without a touchpad.
  */
 @Composable
 internal fun RokuRowContent(
@@ -47,6 +49,7 @@ internal fun RokuRowContent(
     itemKey: ((index: Int) -> Any)? = null,
     itemContentDescription: ((index: Int) -> String?)? = null,
     rowFocused: () -> Boolean = AlwaysFocused,
+    focusedItemModifier: Modifier = Modifier,
     itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
 ) {
     if (state.itemCount == 0) return
@@ -114,6 +117,7 @@ internal fun RokuRowContent(
                     // beyond its bounds; without lifting it, LazyRow's placement
                     // order draws the NEXT sibling over its trailing edge.
                     .zIndex(if (isSelected) 1f else 0f)
+                    .then(if (showAsFocused) focusedItemModifier else Modifier)
                     // Unmerged on purpose: merging here was measured on an API 31 TV emulator to
                     // drop this node's own contentDescription without actually absorbing the
                     // card's children, leaving a worse tree than not merging at all.
