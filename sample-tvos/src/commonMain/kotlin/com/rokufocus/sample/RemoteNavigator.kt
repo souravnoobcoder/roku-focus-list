@@ -19,8 +19,8 @@ internal enum class PanAxis { Horizontal, Vertical }
  *   through [onHint] as a fraction of a step in [-1, 1] per axis, so the focused card can lean
  *   toward the thumb and spring back — the native focus-movement hint. It starts with the very
  *   first report, before the contact has travelled far enough to commit to an axis, so even a
- *   brush of the pad is answered. At the end of a row the fraction pins at full pull instead of
- *   winding up.
+ *   brush of the pad is answered. At the end of a row the lean pins at full pull and further
+ *   pushing is dropped, so pulling back moves after one step of travel, not two.
  *
  * Direction is the screen's: swiping right moves the selection to the right, swiping down moves
  * it down.
@@ -38,6 +38,8 @@ internal class RemoteNavigator(
     private var travel = 0f
     private var draggedSteps = 0
     private var peakSpeed = 0f
+    /** Which edge the thumb is pushing against, as a direction; 0 when it is not. */
+    private var edgePull = 0
 
     fun onEvent(event: RemotePanEvent) {
         when (event) {
@@ -55,6 +57,7 @@ internal class RemoteNavigator(
         travel = 0f
         draggedSteps = 0
         peakSpeed = 0f
+        edgePull = 0
     }
 
     private fun drag(dx: Float, dy: Float, velocityX: Float, velocityY: Float) {
@@ -80,6 +83,12 @@ internal class RemoteNavigator(
         }
         val speed = abs(along(current, velocityX, velocityY))
         if (speed > peakSpeed) peakSpeed = speed
+        if (edgePull != 0 && delta * edgePull > 0f) {
+            // Still pushing into the edge: nothing to accumulate, the lean is already at full pull.
+            hint(current)
+            return
+        }
+        edgePull = 0
         travel += delta * dragGain(speed)
         stepFromTravel(current)
         hint(current)
@@ -95,8 +104,8 @@ internal class RemoteNavigator(
             travel -= direction * count * step
             draggedSteps += count
         } else {
-            // End of the row: hold the hint at full pull rather than letting travel wind up.
-            travel = direction * (step - 1f)
+            edgePull = direction
+            travel = 0f
         }
     }
 
@@ -104,7 +113,11 @@ internal class RemoteNavigator(
 
     private fun hintFor(axis: PanAxis, pendingTravel: Float): Offset {
         val step = stepPoints(axis)
-        val fraction = if (step <= 0f) 0f else (pendingTravel / step).coerceIn(-1f, 1f)
+        val fraction = when {
+            edgePull != 0 -> edgePull.toFloat()
+            step <= 0f -> 0f
+            else -> (pendingTravel / step).coerceIn(-1f, 1f)
+        }
         return if (axis == PanAxis.Horizontal) Offset(fraction, 0f) else Offset(0f, fraction)
     }
 
