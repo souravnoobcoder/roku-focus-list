@@ -689,14 +689,16 @@ so the swipe is not applied twice. Clicks and D-pad ring presses are `UIPress` e
 unaffected.
 
 **What "smooth like the system apps" actually is.** The native tvOS focus engine does not jump N
-items at lift-off. Focus follows the thumb while it is on the pad, one item per item-width of
-travel, and a flick coasts on with momentum, each further item arriving a little later than the
-last. `sample-tvos/` reproduces that model on top of this library: continuous drag → `rokuMoveBy`
-per item (coalesced when travel arrives faster than one item per report), fling →
-`stepsForVelocity(v)` further single steps on a decelerating schedule, a new touch cancelling the
-coast. Whichever pacing you choose, chained moves scroll as one continuous motion: the library's
-scroll animation carries its velocity across retargets instead of restarting from rest on each
-item.
+items at lift-off, and it does not coast after it either. Focus follows the thumb while it is on
+the pad, a fast thumb covers more ground than a slow one, movement stops the moment the thumb
+lifts, and travel too small to change focus leans the focused card toward the thumb and springs it
+back — the focus-movement hint that tells the user a small swipe was felt. `sample-tvos/`
+reproduces that model on top of this library: drag → `rokuMoveBy` per item-width of travel
+(coalesced when travel arrives faster than one item per report), velocity → a smooth gain on that
+travel rather than extra steps, and the hint driven from the sub-step remainder. `stepsForVelocity`
+is for input that arrives as a single fling event with no drag phase to track. Whichever pacing you
+choose, chained moves scroll as one continuous motion: the library's scroll animation carries its
+velocity across retargets instead of restarting from rest on each item.
 
 ---
 
@@ -871,7 +873,7 @@ which is why no platform-specific source set is needed.
 |---|---|
 | `roku-focus-list/` | The library. All code in `src/commonMain/kotlin`, tests in `src/commonTest/kotlin`. |
 | `app/` | Android TV demo app: 100 rows, 6 card types, 7 demo screens. Run on a TV emulator or device. |
-| `sample-tvos/` | Runnable Apple TV sample: Siri Remote touchpad → continuous drag tracking + fling momentum on top of `rokuMoveBy` / `rokuMoveRowsBy`, with an on-screen gesture and frame-timing readout. Xcode project in `sample-tvos/tvosApp/`; build in Release for a fair read on smoothness. |
+| `sample-tvos/` | Runnable Apple TV sample: Siri Remote touchpad → drag tracking with velocity gain and the focus-movement hint, on top of `rokuMoveBy` / `rokuMoveRowsBy`, with an on-screen gesture and frame-timing readout. Xcode project in `sample-tvos/tvosApp/`; build in Release for a fair read on smoothness. |
 | `consumer-kmp/` | Verification module — a KMP library whose `commonMain` uses `RokuLazyRow` / `RokuLazyColumn`. |
 | `verification/published-consumer/` | Standalone Gradle build that resolves the **published** artifact from `mavenLocal` in `commonMain`. |
 

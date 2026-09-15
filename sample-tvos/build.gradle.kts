@@ -26,6 +26,7 @@ kotlin {
             implementation(libs.compose.mp.runtime)
             implementation(libs.compose.mp.foundation)
             implementation(libs.compose.mp.ui)
+            implementation(libs.compose.mp.animation)
             implementation(libs.compose.mp.ui.tooling.preview)
         }
     }

@@ -1,12 +1,13 @@
 package com.rokufocus.sample
 
 /**
- * One report from the host's pan recogniser, in UIKit points. [Changed] carries the movement since
- * the previous report, not the total, so the receiver can follow the finger as it goes.
+ * One report from the host's pan recogniser, in UIKit points and points per second. [Changed]
+ * carries the movement since the previous report, not the total, so the receiver can follow the
+ * finger as it goes, plus the finger's speed at that moment.
  */
 sealed interface RemotePanEvent {
     data object Began : RemotePanEvent
-    data class Changed(val dx: Float, val dy: Float) : RemotePanEvent
+    data class Changed(val dx: Float, val dy: Float, val velocityX: Float, val velocityY: Float) : RemotePanEvent
     data class Ended(val velocityX: Float, val velocityY: Float) : RemotePanEvent
     data object Cancelled : RemotePanEvent
 }

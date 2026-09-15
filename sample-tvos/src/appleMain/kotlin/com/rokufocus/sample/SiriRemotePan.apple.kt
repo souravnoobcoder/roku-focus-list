@@ -18,12 +18,12 @@ import platform.darwin.NSObject
 
 /**
  * Streams Siri Remote touchpad movement to [TvRemotePan] for the whole life of a contact: a
- * [RemotePanEvent.Began], a [RemotePanEvent.Changed] per movement report, and a
- * [RemotePanEvent.Ended] carrying the lift-off velocity in points per second.
+ * [RemotePanEvent.Began], a [RemotePanEvent.Changed] per movement report with the finger's speed
+ * at that moment, and a [RemotePanEvent.Ended] when it lifts.
  *
  * This is how the native focus engine treats the touchpad — focus follows the finger while it is
- * down and coasts on after a flick — and it is the model [RemoteNavigator] reproduces. Reporting
- * once at the end, as an earlier version of this file did, can only ever produce a jump.
+ * down and stops when it lifts — and it is the model [RemoteNavigator] reproduces. Reporting once
+ * at the end, as an earlier version of this file did, can only ever produce a jump.
  */
 @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
 private class SiriRemotePanTarget : NSObject() {
@@ -54,8 +54,11 @@ private class SiriRemotePanTarget : NSObject() {
 
     private fun forwardTranslation(recognizer: UIPanGestureRecognizer, view: UIView) {
         val (dx, dy) = recognizer.translationInView(view).useContents { x to y }
+        val (vx, vy) = recognizer.velocityInView(view).useContents { x to y }
         recognizer.setTranslation(CGPointMake(0.0, 0.0), inView = view)
-        TvRemotePan.onEvent?.invoke(RemotePanEvent.Changed(dx.toFloat(), dy.toFloat()))
+        TvRemotePan.onEvent?.invoke(
+            RemotePanEvent.Changed(dx.toFloat(), dy.toFloat(), vx.toFloat(), vy.toFloat())
+        )
     }
 }
 
