@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Velocity-scaled multi-step navigation for touchpad remotes.** `RokuFocusListState.moveBy(steps)` and `RokuColumnState.moveRowsBy(steps)` move the selection N items or rows as **one logical move**: one selection change, one `onItemSelected`, one highlight animation and one scroll, however many items it covers — the coalescing a consumer cannot build from outside by calling `moveNext()` in a loop. Moves clamp at the ends; `wrapAround` applies only when already parked on the edge being pushed, exactly like single steps; `moveBy(0)` is a no-op. `moveNext()` / `movePrevious()` are now implemented on top of the same core and behave identically to `moveBy(±1)`. `moveRowsBy` steps over rows with nothing to select the way UP/DOWN do.
+
+- `rokuMoveBy` / `rokuMoveRowsBy`: edge-aware variants that apply `focusEscape` and `onBoundaryHit` **once per move**, never per step. A partly-consumable move (two items left, three asked for) consumes what it can and then applies the edge policy once; a closed edge clamps without escaping.
+
+- `RokuFocusConfig` gains `swipeVelocityThreshold` (500), `swipeMaxSteps` (5), `swipeSensitivity` (1) and `swipeStepsForVelocity` (a full override), appended after the existing parameters so positional 2.x calls keep their meaning, plus `RokuFocusConfig.stepsForVelocity(velocity)`: 1 at or below the threshold, linear growth above it scaled by sensitivity, capped at `swipeMaxSteps`. Degenerate inputs (NaN, infinite, non-positive threshold, zero cap) resolve to something sensible rather than throwing.
+
+- Key-repeat arbitration: a multi-step move resets the acceleration streak, so a swipe landing mid-D-pad-repeat cannot compound with repeat acceleration into a runaway scroll. The D-pad path is unchanged and still accelerates.
+
+- `sample-tvos/`: a runnable Apple TV sample with the Xcode project to host it. Siri Remote touchpad movement is read by a `UIPanGestureRecognizer` and paced the way the native focus engine paces it — the highlight follows the thumb one item per item-width of travel, and a flick coasts on for `stepsForVelocity(v)` further items on a decelerating schedule. An on-screen readout shows the last gesture's distance, velocity and step counts and the frame timing it produced. The library itself stays input-agnostic; every gesture line lives in the sample.
+
+- 36 new tests: `RokuMoveByTest` (bounds, wrap-around, single-step parity, the coalescing assertion by *counting* `onItemSelected`, edge policy once, partly-consumable moves, the key-repeat arbiter on both paths) and `RokuSwipeVelocityTest` (threshold, growth, cap, sign, monotonic sensitivity, override, degenerate configs, positional compatibility).
+
+### Changed
+
+- **Scroll animations carry their velocity across retargets.** `animateScrollToItem` starts every call from rest, so a move that interrupted an in-flight scroll — a key repeat, or the run of single steps a touchpad swipe produces — made the content stop dead and ease in again, a visible pulse per item. Both renderers now drive their lazy list through one spring per list that hands its velocity to the next target, so chained moves read as one continuous scroll. The spring is the same `spring()` `animateScrollToItem` uses, so a lone D-pad step is timed exactly as before; far jumps and not-yet-measured lists still go through `animateScrollToItem`. Everything remains animated.
+
+- README: a "Touchpad remotes" section covering the API above, and two facts about the Compose tvOS fork that decide how a consumer must wire a swipe: it already synthesises one D-pad key per touchpad swipe at lift-off (so a host pan recogniser must keep `cancelsTouchesInView = true` or every swipe is applied twice), and its published build lays a real Apple TV HD out at density 1.0.
+
 ## [2.2.0] - 2026-09-14
 
 ### Added

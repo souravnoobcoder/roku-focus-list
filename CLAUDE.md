@@ -18,29 +18,31 @@ platform API.
 |---|---|
 | `RokuApi.kt` | **Public API.** Four entry points: `RokuLazyRow` (DSL + state overloads) and `RokuLazyColumn` (DSL + state overloads). The DSL `RokuLazyRow` invisibly composes item 0 to auto-measure item width. The column DSL does the same per row for omitted `itemWidth` / `itemHeight` / `headerHeight` (`RokuColumnAutoMeasure`); a row still waiting on measurement is treated exactly like an empty row. |
 | `RokuScope.kt` | DSL scopes: `RokuItemScope.items(...)`, `RokuLazyColumnScope.row(...)` / `.customRow(...)`, `@RokuDsl`. Plain collector classes, no magic. `key` and `initialIndex` sit *after* the 1.x parameters so positional calls keep their meaning. |
-| `RokuRowContent.kt` | Internal pure LazyRow renderer. No focus, no highlight. Scrolls via `snapshotFlow { windowStart }` → `animateScrollToItem` (collectLatest), so scrolling never recomposes it. Per-item `derivedStateOf` for selection; `rowFocused` lambda merged per item. |
+| `RokuRowContent.kt` | Internal pure LazyRow renderer. No focus, no highlight. Scrolls via `snapshotFlow { windowStart }` → `RokuScrollAnimator` (collectLatest), so scrolling never recomposes it. Per-item `derivedStateOf` for selection; `rowFocused` lambda merged per item. |
+| `RokuScrollAnimator.kt` | Internal. Drives a `LazyListState` to an absolute pixel offset with one spring whose velocity is carried across retargets (`AnimationState` + `sequentialAnimation`), so a run of quick moves scrolls as one motion. Falls back to `animateScrollToItem` for far jumps and unmeasured lists. Also the `absoluteOffsetPx` / `targetOffsetPx` helpers both renderers use. |
 | `RokuLazyRow.kt` | `RokuLazyRowImpl` — **standalone** horizontal row. `RokuRowContent` + focusable + key handler + highlight overlay. For use outside a column. |
 | `RokuLazyColumn.kt` | `RokuLazyColumnImpl` — **OTT layout**. Single focusable composable. LazyColumn of `RokuRowContent` items. Renders ONE global highlight that animates X/Y/width/height between rows. Uses `BoxWithConstraints` for accurate viewport measurement. |
-| `RokuFocusListState.kt` | State holder per row. `selectedIndex` is **derived** from `requestedIndex` coerced into the current range; `windowStart` / `highlightSlot` / `visibleCount` as before, plus `Saver`, `hasFocus`, `requestFocus()`, `focusMode` and the raw floating `windowAnchor`. Also holds `computeHighlightOffsetPx()`. |
-| `RokuColumnState.kt` | Public column state: derived `selectedRowIndex`, `requestedRowIndex`, `rowCount`, `hasSelectableRow`, `hasFocus`, `requestFocus()`, `Saver`, `rememberRokuColumnState`. |
+| `RokuFocusListState.kt` | State holder per row. `selectedIndex` is **derived** from `requestedIndex` coerced into the current range; `windowStart` / `highlightSlot` / `visibleCount` as before, plus `Saver`, `hasFocus`, `requestFocus()`, `focusMode` and the raw floating `windowAnchor`. `moveBy(steps)` is the coalesced multi-step move; `moveNext` / `movePrevious` are `moveSteps(±1)` over the same internal core. Also holds `computeHighlightOffsetPx()`. |
+| `RokuColumnState.kt` | Public column state: derived `selectedRowIndex`, `requestedRowIndex`, `rowCount`, `hasSelectableRow`, `hasFocus`, `requestFocus()`, `Saver`, `rememberRokuColumnState`. `moveRowsBy(steps)` / internal `moveRowSteps` step over unselectable rows the way UP/DOWN do. |
 | `RokuRowSelection.kt` | Pure `nextSelectableRow` / `nearestSelectableRow` — how UP/DOWN steps over rows with nothing to select. |
 | `RokuResolvedRow.kt` | Internal sealed view of a column row (`Items` rail vs consumer-drawn `Custom`) + the `RokuNavKey` enum handed to `customRow`. |
 | `RokuHighlightScope.kt` | Receiver of `focusHighlight`: `BoxScope` + `rowIndex` / `itemIndex`. `isFocused` stays a lambda parameter so 1.x highlight lambdas still compile. |
 | `RokuFocusEscape.kt` | Per-edge focus escape (`start`, `end`, `up`, `down`) with `All` / `None` / `Horizontal` / `Vertical` presets. |
 | `RokuFocusMode.kt` | `Static` (fixed slot, content scrolls — default) vs `Floating` (highlight walks the window, scrolls only at its edges). Per axis: horizontal on `RokuFocusListState.focusMode`, vertical via `RokuLazyColumn(verticalFocusMode = ...)`. |
-| `RokuKeyRepeat.kt` | `RokuKeyRepeatTracker` — key-repeat throttle + acceleration counters, held by the state objects. Plain fields, never read during composition. |
+| `RokuKeyRepeat.kt` | `RokuKeyRepeatTracker` — key-repeat throttle + acceleration counters, held by the state objects. Plain fields, never read during composition. `reset()` clears the acceleration streak (not the throttle); the multi-step moves call it. |
 | `RokuColumnRowConfig.kt` | Per-row config for the state-based `RokuLazyColumn`: state, itemWidth/Height, spacing, contentPadding, headerHeight, key, itemContentDescription. |
 | `RokuFocusHighlight.kt` | `DefaultFocusHighlight` — BoxScope extension. Rounded border drawn OUTSIDE card bounds via `drawBehind` + `graphicsLayer { clip = false }` with configurable `overflow` (default 6dp). |
-| `RokuKeyHandler.kt` | `Modifier.rokuKeyHandler()` — used by standalone `RokuLazyRow`. Handles LEFT/RIGHT + Enter, passes UP/DOWN through. A plain modifier factory; repeat state lives on `RokuFocusListState`. Also holds `moveWithinRow` and the escape-edge lookup. |
+| `RokuKeyHandler.kt` | `Modifier.rokuKeyHandler()` — used by standalone `RokuLazyRow`. Handles LEFT/RIGHT + Enter, passes UP/DOWN through. A plain modifier factory; repeat state lives on `RokuFocusListState`. Also holds `moveWithinRow`, the escape-edge lookup, and the public `rokuMoveBy` / `rokuMoveRowsBy` — edge-aware multi-step moves for touchpad input that apply the escape policy and `onBoundaryHit` once per move, never per step. |
 | `RokuColumnKeyHandler.kt` | Internal `Modifier.rokuColumnKeyHandler()`. Handles ALL D-pad events for `RokuLazyColumn`: UP/DOWN between selectable rows, LEFT/RIGHT/ENTER to the active row's state or to a custom row's `onKeyEvent`. |
 | `RokuClock.kt` | Internal monotonic ms clock built on `kotlin.time.TimeSource.Monotonic`. Replaces `android.os.SystemClock.uptimeMillis()`. |
-| `RokuFocusConfig.kt` | Config data class: animation spec, key repeat delay + acceleration, wrapAround, haptics, `focusEscape`. Keeps a deprecated `allowFocusEscape` factory and read-path extension. |
+| `RokuFocusConfig.kt` | Config data class: animation spec, key repeat delay + acceleration, wrapAround, haptics, `focusEscape`, and the swipe knobs (`swipeVelocityThreshold`, `swipeMaxSteps`, `swipeSensitivity`, `swipeStepsForVelocity`) appended last so positional 2.x calls keep their meaning. `RokuFocusConfig.stepsForVelocity(velocity)` is the velocity → step-count curve. Keeps a deprecated `allowFocusEscape` factory and read-path extension. |
 | `RokuAnimationSpec.kt` | Preset animation specs (Default, Fast, Smooth). |
 
 Tests live in `src/commonTest/kotlin/com/rokufocus/` and run on the desktop JVM target
 (`:roku-focus-list:desktopTest`): `RokuFocusListStateTest`, `RokuColumnStateTest`,
 `RokuRowSelectionTest`, `RokuRowMovementTest`, `RokuFocusEscapeTest`,
-`RokuKeyRepeatTrackerTest`, `RokuHighlightOffsetTest`, `RokuFloatingWindowTest`, `RokuClockTest`.
+`RokuKeyRepeatTrackerTest`, `RokuHighlightOffsetTest`, `RokuFloatingWindowTest`, `RokuClockTest`,
+`RokuMoveByTest`, `RokuSwipeVelocityTest`.
 
 ### Key design decisions
 
@@ -60,6 +62,9 @@ Tests live in `src/commonTest/kotlin/com/rokufocus/` and run on the desktop JVM 
 - **The vertical accelerated-repeat snap is intentional, and the horizontal path deliberately has no counterpart.** `RokuLazyColumn` swaps `animateScrollToItem` for an instant `scrollToItem` once `keyRepeat.consecutivePresses > config.keyRepeatAccelAfter`; `RokuRowContent` always animates, relying on `collectLatest` to cancel and re-target an in-flight animation instead. The asymmetry is the settled choice, in that direction: animation is the default everywhere and the snap is only an escape hatch for a user holding the key down. Instrumented on real Apple TV hardware across 35 vertical moves the snap branch fired **once**, and it was not the cause of the jerky scrolling in that investigation (density/frame-rate was — see the README). Do not resolve the asymmetry by adding a snap branch to the horizontal path; if it is ever resolved, resolve it toward always animating.
 - **`RokuClock` offsets readings by a 1,000,000ms baseline.** The key handlers seed `lastKeyTime = 0L` to mean "no key pressed yet"; `SystemClock.uptimeMillis()` returned time since boot so 0 always looked far in the past. A clock starting near zero would have made the first D-pad press get throttled. Do not remove the baseline.
 - **`@SuppressLint` is unavailable in commonMain.** `UnusedBoxWithConstraintsScope` is disabled via `lint { disable += ... }` in the library's `kotlin { android { } }` block instead.
+- **A multi-step move writes the selection once.** `moveBy(n)` / `moveRowsBy(n)` clamp the target and call `scrollTo` a single time, so a five-item swipe is one selection change, one `onItemSelected`, one highlight animation and one scroll — the coalescing a consumer cannot get by calling `moveNext()` in a loop. `moveNext` / `movePrevious` are `moveSteps(±1)` over the same internal core, never a duplicate. Wrap-around applies only when already parked on the edge being pushed against, mirroring single steps. The key-repeat arbiter: `moveBy` **resets** `consecutivePresses` so a swipe landing mid-repeat cannot compound with acceleration, while the D-pad path (`moveWithinRow`) deliberately does not — resetting inside the shared core would run before `accept()` and pin the streak at 1, so acceleration (and the column's snap branch) could never engage. Both facts are mutation-tested in `RokuMoveByTest`.
+- **Scroll animations carry their velocity across retargets.** `animateScrollToItem` builds a fresh `AnimationState(0f)` per call, so every interrupting move (key repeat, or the run of single steps a touchpad drag/fling produces) stopped the content dead and eased in again from rest — a visible pulse per item at 60–200 ms cadence. `RokuScrollAnimator` keeps one `AnimationState` per list and passes `sequentialAnimation = velocity != 0f`, so a retarget bends the motion. It drives the list with `scrollBy` per frame using the *consumed* delta (no drift; hitting the end cancels), takes the target from the visible item's measured offset when it is on screen and from the row/item geometry otherwise, and clamps a carried-velocity overshoot to the start→target segment. Far jumps (more than a viewport) and unmeasured lists still use `animateScrollToItem` for its teleporting, and the spring is `spring()` — the same spec `animateScrollToItem` uses — so a lone D-pad step is timed exactly as before. The vertical accelerated-repeat snap branch is untouched. Everything is animated; nothing here snaps.
+- **The Compose tvOS fork already turns touchpad swipes into D-pad keys.** In the published 1.12.0 build (`ComposeSceneMediator.tvos.kt`, tag `tvos-1.12.0`) an indirect `UITouch` that travelled ≥ 40 dp between BEGAN and ENDED dispatches one `Key.Direction*` KeyDown+KeyUp at lift-off; a slow drag gets exactly one step, a long flick gets exactly one step, and `touchesCancelled` clears the pending touch so nothing is dispatched. Newer `tvos-main` has a GameController-based recogniser (`SiriRemoteTouchOracle`) that rejects contacts longer than 250 ms and still emits at most one key per contact. Consequences: (1) a host that adds its own `UIPanGestureRecognizer` must leave `cancelsTouchesInView = true` or every swipe moves twice — the sample's first build did exactly that, with the pan handler's sign flipped, which is why swipes went the wrong way and a one-step swipe netted to nothing; (2) the fork's key carries no velocity, so continuous drag tracking and fling momentum have to come from a host recogniser, which is what `sample-tvos` does. Also: the published fork squares the UIKit screen scale for the scene density, so a real Apple TV HD (scale 1) lays out at density **1.0**, a 1920×1080 dp canvas; `tvos-main` has since changed this to 2 × scale. The sample pins 960 dp (`WithTvDensity`) rather than trusting it.
 
 ### Highlight positioning math (horizontal)
 ```
@@ -112,12 +117,41 @@ Wrap-Around, Floating Focus, Plain Compose comparison). Images from `picsum.phot
 `SampleData.kt` generates items programmatically by cycling 45 base entries.
 `App.kt` configures Coil 3 singleton ImageLoader with crossfade.
 
+## Apple TV sample: `sample-tvos/`
+
+A runnable tvOS app (`tvosArm64` + `tvosSimulatorArm64`, static framework `RokuSample`) plus the
+Xcode project that hosts it in `sample-tvos/tvosApp/`. It exists to put the library on a real Apple
+TV and to show what a touchpad consumer has to do, since the library itself is input-agnostic.
+
+| File | Role |
+|---|---|
+| `SwipeSampleScreen.kt` | Six rails, **state-based** `RokuLazyColumn` (the `row { }` DSL keeps row state private, so a horizontal swipe cannot reach it). Under the title: one line with the last gesture, one with the frame timing it produced. `onItemSelected` logs `[roku] key …` — a key line with no `[roku] move` before it means the fork's swipe-to-focus got through. |
+| `RemoteNavigator.kt` | The tvOS focus-engine model on top of `rokuMoveBy` / `rokuMoveRowsBy`: **drag** moves one item per item-width of travel along a locked axis (coalesced when travel arrives faster than one item per report), **fling** coasts `stepsForVelocity(v)` more items on a growing-delay schedule; a new touch cancels the coast. Direction is the screen's (swipe right → right). |
+| `SiriRemotePan.apple.kt` | `UIPanGestureRecognizer` on the Compose host view streaming Began / Changed(dx,dy) / Ended(vx,vy) in UIKit points. `cancelsTouchesInView = true` is what suppresses the fork's own one-key swipe. |
+| `TvRemotePan.kt` | Hand-off object (`onEvent`, `screenScale`) between UIKit and the Compose tree. |
+| `TvDensity.kt` | `WithTvDensity`: pins a 960 dp design width (see the density note above). |
+| `FrameReport.kt` | Samples `withFrameNanos` for 1.5 s after each gesture: fps, worst frame, missed vsyncs. On demand only — awaiting frames forces them. |
+| `tvosApp/` | Xcode project. The "Compile Kotlin" phase runs `./gradlew :sample-tvos:embedAndSignAppleFrameworkForXcode`; `Config.xcconfig` carries `TEAM_ID` / `BUNDLE_ID` (`com.rokufocus.sample`). |
+
+Build for the connected Apple TV in **Release** — a Debug Kotlin/Native framework is unoptimised and
+is not a fair read on smoothness:
+
+```bash
+xcodebuild -project sample-tvos/tvosApp/tvosApp.xcodeproj -scheme tvosApp -configuration Release \
+  -destination 'id=<device udid>' -derivedDataPath sample-tvos/tvosApp/build/DerivedData -allowProvisioningUpdates build
+xcrun devicectl device install app --device <udid> "sample-tvos/tvosApp/build/DerivedData/Build/Products/Release-appletvos/RokuFocus Sample.app"
+xcrun devicectl device process launch --device <udid> --terminate-existing --console com.rokufocus.sample<TEAM_ID>
+```
+
+`--console` streams the app's stdout, so the `[roku] …` lines (pan distance/velocity, each move, frame
+stats) can be read from the Mac while someone swipes on the remote.
+
 ## Verification modules
 
 | Module | Purpose |
 |---|---|
 | `consumer-kmp/` | KMP library whose `commonMain` uses `RokuLazyRow` / `RokuLazyColumn` via `project(":roku-focus-list")`. Proves commonMain consumption compiles for android + desktop + iOS. |
-| `verification/published-consumer/` | **Standalone** Gradle build (own `settings.gradle.kts`, not in root settings). Resolves `io.github.souravnoobcoder:roku-focus-list:2.2.0` from `mavenLocal()` in `commonMain`, and applies the `compose-tvos` settings plugin so the tvOS leg proves an Apple TV consumer resolves too. Run with `./gradlew -p verification/published-consumer verifyCommonMainConsumption`. Proves the published Gradle module metadata works. |
+| `verification/published-consumer/` | **Standalone** Gradle build (own `settings.gradle.kts`, not in root settings). Resolves `io.github.souravnoobcoder:roku-focus-list:2.3.0` from `mavenLocal()` in `commonMain`, and applies the `compose-tvos` settings plugin so the tvOS leg proves an Apple TV consumer resolves too. Run with `./gradlew -p verification/published-consumer verifyCommonMainConsumption`. Proves the published Gradle module metadata works. |
 
 ## Build
 
@@ -138,7 +172,7 @@ Wrap-Around, Floating Focus, Plain Compose comparison). Images from `picsum.phot
 
 ## Publishing
 
-- Group `io.github.souravnoobcoder`, artifact `roku-focus-list`, version `2.2.0`, published to Maven Central via the Sonatype Central Portal (`com.vanniktech.maven.publish`).
+- Group `io.github.souravnoobcoder`, artifact `roku-focus-list`, version `2.3.0`, published to Maven Central via the Sonatype Central Portal (`com.vanniktech.maven.publish`).
 - **JitPack cannot serve this library.** Six KMP publications trip its multi-module handling: it re-groups everything under `com.github.owner.repo` and rewrites the metadata, after which a `commonMain` dependency fails on `Could not find roku-focus-list-iosarm64-<v>.jar`. Verified against the real 2.0.0 tag it built. Do not go back.
 - KMP `maven-publish` creates 8 publications: `kotlinMultiplatform` (root, carries the commonMain metadata variant and redirects), `android`, `desktop`, `iosArm64`, `iosSimulatorArm64`, `tvosArm64`, `tvosSimulatorArm64`, `wasmJs`.
 - Consumers only ever reference the root coordinate.
@@ -148,6 +182,7 @@ Wrap-Around, Floating Focus, Plain Compose comparison). Images from `picsum.phot
 ## Known issues / future work
 
 - `headerHeight` in `RokuColumnRowConfig` (state-based overload) must still be specified manually — only the DSL auto-measures
+- The `row { }` DSL keeps each row's `RokuFocusListState` private, so a host that needs to drive the focused row from outside (a horizontal swipe via `rokuMoveBy`) must use the state-based `RokuLazyColumn` — and therefore loses header auto-measure. Exposing the active row's state, or letting `row {}` accept one, would close this
 - Vertical `focusSlot` is hardcoded to 0 (top-aligned) — could be made configurable like horizontal
 - `RokuLazyRow` standalone doesn't know `itemHeight`, so highlight overflow works on width only (height uses `fillMaxHeight`)
 - An empty row still leaves the row spacing on either side of it, because `LazyColumn` allocates spacing around a zero-height item

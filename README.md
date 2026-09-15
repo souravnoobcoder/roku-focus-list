@@ -86,6 +86,12 @@ Leave `composeTvos { strictMode }` off. It reports false positives on iOS-only p
 (`*-uikitarm64`, `*-uikitsimarm64`) and on conflict-resolution losers, failing builds whose linked
 graph is fine.
 
+Two more things the fork decides for you, both covered in detail further down: it turns every
+touchpad swipe into a single D-pad key at lift-off (see [Touchpad remotes](#touchpad-remotes-multi-step-moves-and-swipe-velocity)),
+and on a real Apple TV HD it lays the scene out at density 1.0 (see
+[Check `LocalDensity`](#check-localdensity-on-real-tv-hardware)). `sample-tvos/` is a runnable
+Apple TV app that handles both.
+
 ### Samsung TV (Tizen)
 
 A Tizen TV app is a web app — HTML, JS and WebAssembly wrapped in a `config.xml` widget manifest —
@@ -122,7 +128,7 @@ Published to Maven Central, so `mavenCentral()` in your repositories is all the 
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("io.github.souravnoobcoder:roku-focus-list:2.2.0")
+            implementation("io.github.souravnoobcoder:roku-focus-list:2.3.0")
         }
     }
 }
@@ -135,7 +141,7 @@ for `commonMain`, the AAR for Android, a jar for desktop, klibs for iOS.
 
 ```kotlin
 dependencies {
-    implementation("io.github.souravnoobcoder:roku-focus-list:2.2.0")
+    implementation("io.github.souravnoobcoder:roku-focus-list:2.3.0")
 }
 ```
 
@@ -610,7 +616,8 @@ val config = RokuFocusConfig(
     keyRepeatFastDelayMs = 50L,     // fast speed once accelerated
     wrapAround = true,              // wrap from last to first
     hapticFeedback = true,          // vibrate at boundaries
-    focusEscape = RokuFocusEscape.All
+    focusEscape = RokuFocusEscape.All,
+    swipeSensitivity = 1.5f         // touchpad flicks travel further (see "Touchpad remotes")
 )
 
 RokuLazyRow(config = config) { /* items */ }
@@ -618,13 +625,17 @@ RokuLazyRow(config = config) { /* items */ }
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `highlightAnimationSpec` | `AnimationSpec<Float>` | `tween(200ms)` | Highlight and scroll animation |
+| `highlightAnimationSpec` | `AnimationSpec<Float>` | `tween(200ms)` | Highlight position animation. Content scrolling uses its own velocity-carrying spring. |
 | `keyRepeatDelayMs` | `Long` | `150` | Throttle delay for held D-pad keys (ms) |
 | `keyRepeatAccelAfter` | `Int` | `3` | After N presses, switch to fast delay. 0 = disabled |
 | `keyRepeatFastDelayMs` | `Long` | `50` | Fast repeat delay after acceleration |
 | `wrapAround` | `Boolean` | `false` | Wrap from last item to first and vice versa |
 | `hapticFeedback` | `Boolean` | `true` | Vibrate on boundary hit. No-op on desktop and web. |
 | `focusEscape` | `RokuFocusEscape` | `All` | Per-edge control over letting focus leave the list |
+| `swipeVelocityThreshold` | `Float` | `500` | Velocity at or below which a swipe moves one item. Same unit you pass to `stepsForVelocity`. |
+| `swipeMaxSteps` | `Int` | `5` | Cap on the items one swipe can move |
+| `swipeSensitivity` | `Float` | `1` | Scales the curve above the threshold. The one swipe knob most apps touch. |
+| `swipeStepsForVelocity` | `((Float) -> Int)?` | `null` | Full replacement for the built-in curve, cap included |
 
 Built-in animation presets:
 
@@ -633,6 +644,59 @@ RokuAnimationSpec.Default  // tween(300ms) — balanced
 RokuAnimationSpec.Fast     // tween(150ms) — snappy
 RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 ```
+
+---
+
+## Touchpad remotes: multi-step moves and swipe velocity
+
+A Siri Remote or an Android TV touch remote produces swipes with a velocity, not discrete presses.
+Calling `moveNext()` N times for one swipe gives you N selection changes, N highlight animations, N
+scroll animations and N `onItemSelected` callbacks — and every prefetch or saved-position write
+hanging off that callback fires N times too. The library coalesces this for you:
+
+```kotlin
+rowState.moveBy(3)          // one selection change, one animation, one callback
+rowState.moveBy(-2)         // negative steps travel toward the start
+columnState.moveRowsBy(2)   // vertical equivalent; skips rows with nothing to select
+
+// Edge-aware variants that also apply focusEscape / onBoundaryHit exactly once per move:
+rokuMoveBy(rowState, config, steps = 3, onSelected = { index -> /* ... */ })
+rokuMoveRowsBy(columnState, config, steps = -1)
+```
+
+Moves clamp at the ends of a row — asking for more steps than remain lands on the last item. With
+`wrapAround` the move wraps only when the selection is *already* parked on the edge being pushed,
+mirroring single steps. `moveBy(1)` and `moveNext()` behave identically; `moveNext` is implemented
+on top of the same core, not duplicated. A multi-step move also resets the key-repeat acceleration
+streak, so a swipe landing mid-repeat cannot compound into a runaway scroll.
+
+To turn a velocity into a step count, `RokuFocusConfig` has a built-in curve:
+
+```kotlin
+val steps = config.stepsForVelocity(velocityPointsPerSecond)   // 1 at or below the threshold,
+                                                               // grows linearly above it, capped
+rokuMoveBy(rowState, config, if (velocity > 0) steps else -steps)
+```
+
+The library stays **input-agnostic**: it never sees a gesture. Recognising the swipe, and deciding
+how to pace it, is the host's job. Two things to know before you wire one up:
+
+**Apple TV and the Compose tvOS fork.** The fork already turns every touchpad swipe into one D-pad
+key at lift-off — a slow drag is one step, a long flick is one step, and there is no velocity to
+read. If you add your own `UIPanGestureRecognizer` on the Compose host view, leave
+`cancelsTouchesInView = true` (the default): recognising the pan cancels the fork's pending touch,
+so the swipe is not applied twice. Clicks and D-pad ring presses are `UIPress` events and are
+unaffected.
+
+**What "smooth like the system apps" actually is.** The native tvOS focus engine does not jump N
+items at lift-off. Focus follows the thumb while it is on the pad, one item per item-width of
+travel, and a flick coasts on with momentum, each further item arriving a little later than the
+last. `sample-tvos/` reproduces that model on top of this library: continuous drag → `rokuMoveBy`
+per item (coalesced when travel arrives faster than one item per report), fling →
+`stepsForVelocity(v)` further single steps on a decelerating schedule, a new touch cancelling the
+coast. Whichever pacing you choose, chained moves scroll as one continuous motion: the library's
+scroll animation carries its velocity across retargets instead of restarting from rest on each
+item.
 
 ---
 
@@ -753,7 +817,7 @@ keep their 1.x signatures.
 1. `RokuLazyRow` / `RokuLazyColumn` is a **single focusable composable** — individual items are never focused
 2. D-pad events are intercepted at the container level with key-repeat throttling
 3. Selection is tracked via `selectedIndex` in `RokuFocusListState`, not the Compose focus system
-4. Content scrolls via `LazyRow(userScrollEnabled = false)` + `animateScrollToItem()` — Compose handles recycling
+4. Content scrolls via `LazyRow(userScrollEnabled = false)` driven by one spring per list whose velocity is carried across retargets, so a run of quick moves (key repeat, a touchpad drag or fling) reads as one continuous scroll rather than a restart per item; far jumps use `animateScrollToItem()` for its teleporting. Compose handles recycling
 5. The highlight overlay is positioned with `graphicsLayer { translationX/Y }` (GPU-only, no re-layout)
 6. At list edges, overflow correction shifts the highlight to match the actual item position
 7. In `RokuLazyColumn`, one global highlight animates X, Y, width, and height between rows of different card sizes
@@ -807,6 +871,7 @@ which is why no platform-specific source set is needed.
 |---|---|
 | `roku-focus-list/` | The library. All code in `src/commonMain/kotlin`, tests in `src/commonTest/kotlin`. |
 | `app/` | Android TV demo app: 100 rows, 6 card types, 7 demo screens. Run on a TV emulator or device. |
+| `sample-tvos/` | Runnable Apple TV sample: Siri Remote touchpad → continuous drag tracking + fling momentum on top of `rokuMoveBy` / `rokuMoveRowsBy`, with an on-screen gesture and frame-timing readout. Xcode project in `sample-tvos/tvosApp/`; build in Release for a fair read on smoothness. |
 | `consumer-kmp/` | Verification module — a KMP library whose `commonMain` uses `RokuLazyRow` / `RokuLazyColumn`. |
 | `verification/published-consumer/` | Standalone Gradle build that resolves the **published** artifact from `mavenLocal` in `commonMain`. |
 

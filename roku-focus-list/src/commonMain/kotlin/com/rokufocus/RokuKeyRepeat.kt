@@ -28,6 +28,16 @@ internal class RokuKeyRepeatTracker {
         return now - lastKeyTime < delay
     }
 
+    /**
+     * Forgets the acceleration streak outright, without touching [lastKeyTime] so the usual
+     * throttle still spaces out whatever comes next. Called when a non-press input — a swipe
+     * through [RokuFocusListState.moveBy] — moves the selection, so a gesture and a held D-pad
+     * can never stack into a runaway scroll.
+     */
+    fun reset() {
+        consecutivePresses = 0
+    }
+
     /** Records an accepted press, extending the acceleration streak. */
     fun accept(now: Long) {
         lastKeyTime = now

@@ -10,6 +10,7 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
+import kotlin.math.abs
 
 /**
  * Which row of a [RokuLazyColumn] is selected.
@@ -92,6 +93,67 @@ class RokuColumnState(initialRowIndex: Int = 0) {
      */
     fun moveToRow(index: Int) {
         _requestedRowIndex = index.coerceAtLeast(0)
+    }
+
+    /**
+     * Moves the selection [steps] rows as **one logical move** — negative steps travel up. Rows
+     * with nothing to select are stepped over and do not count toward [steps], exactly as UP and
+     * DOWN already skip them, so a three-step swipe lands three *selectable* rows away rather than
+     * being eaten by empty rails.
+     *
+     * However many rows it covers it writes the selection once, so the column scrolls and the
+     * highlight animates a single time instead of N times. See [RokuFocusListState.moveBy] for the
+     * horizontal equivalent and the reasoning.
+     *
+     * The move clamps at the ends of the column. [wrapAround] applies only when the selection is
+     * already parked on the last (or first) selectable row, wrapping to the other end.
+     *
+     * Calling this resets the key-repeat acceleration streak, so a swipe cannot compound with a
+     * held D-pad into a runaway scroll.
+     *
+     * @return whether the selection actually changed. `moveRowsBy(0)` is a no-op returning false.
+     */
+    fun moveRowsBy(steps: Int, wrapAround: Boolean = false): Boolean {
+        if (steps == 0) return false
+        keyRepeat.reset()
+        return moveRowSteps(steps, wrapAround) != 0
+    }
+
+    /**
+     * Shared core of [moveRowsBy], returning how many selectable rows the selection actually
+     * covered so a caller can tell a fully-consumed move from a clipped one.
+     */
+    internal fun moveRowSteps(steps: Int, wrapAround: Boolean): Int {
+        if (steps == 0 || _rowCount == 0) return 0
+        val start = selectedRowIndex
+        val direction = if (steps > 0) 1 else -1
+
+        var current = start
+        var consumed = 0
+        var remaining = abs(steps)
+        while (remaining > 0) {
+            val next = nextSelectableRow(_rowCount, current, direction, rowSelectable)
+            if (next < 0) break
+            current = next
+            consumed++
+            remaining--
+        }
+
+        if (consumed == 0) {
+            if (!wrapAround) return 0
+            // Already parked on the edge row: wrap to the selectable row at the far end.
+            val wrapTarget = nearestSelectableRow(
+                _rowCount,
+                if (direction > 0) 0 else _rowCount - 1,
+                rowSelectable
+            )
+            if (wrapTarget < 0 || wrapTarget == start) return 0
+            moveToRow(wrapTarget)
+            return abs(steps)
+        }
+
+        moveToRow(current)
+        return consumed
     }
 
     /**

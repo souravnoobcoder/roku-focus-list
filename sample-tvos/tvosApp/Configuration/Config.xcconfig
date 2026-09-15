@@ -1,0 +1,6 @@
+// Fill in TEAM_ID with your own Apple Developer Team ID (Xcode > Signing &
+// Capabilities will also let you pick it interactively) before building for
+// a real Apple TV. It can stay empty for the tvOS Simulator.
+TEAM_ID=C9B8BLAK2X
+BUNDLE_ID=com.rokufocus.sample
+APP_NAME=RokuFocus Sample

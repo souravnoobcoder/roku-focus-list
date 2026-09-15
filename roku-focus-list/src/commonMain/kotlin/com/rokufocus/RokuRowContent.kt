@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.CollectionItemInfo
@@ -57,14 +58,33 @@ internal fun RokuRowContent(
     val currentRowFocused = rememberUpdatedState(rowFocused)
 
     val lazyListState = rememberLazyListState()
+    val scrollAnimator = remember(lazyListState) { RokuScrollAnimator() }
+
+    val density = LocalDensity.current
+    val itemWidthPx = with(density) { itemWidth.toPx() }
+    val itemSpacingPx = with(density) { itemSpacing.toPx() }
 
     // Scroll when the visible window shifts. Collected from a snapshotFlow rather than read in
     // composition, so a window move touches only the scroll position — this composable never
-    // recomposes for it and the item subtrees stay skippable. collectLatest keeps the old
-    // restart-on-change semantics: a repeat press cancels the in-flight animation.
-    LaunchedEffect(state, lazyListState) {
+    // recomposes for it and the item subtrees stay skippable. collectLatest cancels the in-flight
+    // animation on the next move; RokuScrollAnimator carries its velocity into the new one, so a
+    // run of quick steps scrolls as one continuous motion rather than restarting from rest each
+    // time. Everything here reads layoutInfo, never snapshot state, so no composition subscribes.
+    LaunchedEffect(state, lazyListState, itemWidthPx, itemSpacingPx) {
+        val stepPx = itemWidthPx + itemSpacingPx
         snapshotFlow { state.windowStart }.collectLatest { windowStart ->
-            lazyListState.animateScrollToItem(windowStart, 0)
+            val info = lazyListState.layoutInfo
+            val viewportPx = info.viewportSize.width.toFloat()
+            val currentPx = lazyListState.absoluteOffsetPx(stepPx)
+            val totalContentPx = info.beforeContentPadding + info.afterContentPadding +
+                state.itemCount * itemWidthPx + (state.itemCount - 1) * itemSpacingPx
+            val targetPx = lazyListState.targetOffsetPx(
+                index = windowStart,
+                currentPx = currentPx,
+                estimatedPx = windowStart * stepPx,
+                maxScrollPx = totalContentPx - viewportPx
+            )
+            scrollAnimator.scrollToIndex(lazyListState, windowStart, currentPx, targetPx, viewportPx)
         }
     }
 

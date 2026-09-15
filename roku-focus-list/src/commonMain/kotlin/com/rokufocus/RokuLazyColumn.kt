@@ -277,11 +277,26 @@ internal fun RokuLazyColumnImpl(
         // Keyed on the geometry as well as the scroll target: scrolling to the last row of a list
         // that is still loading gets clamped, and once later rows arrive the column would
         // otherwise sit at that clamped offset while the highlight maths assumed the unclamped one.
+        // A new key cancels the in-flight animation; the animator carries its velocity into the
+        // next one so successive row moves read as one scroll, not a restart per row.
+        val scrollAnimator = remember(lazyColumnState) { RokuScrollAnimator() }
         LaunchedEffect(scrollTargetRow, geometry) {
             if (state.keyRepeat.consecutivePresses > config.keyRepeatAccelAfter) {
+                scrollAnimator.reset()
                 lazyColumnState.scrollToItem(scrollTargetRow)
             } else {
-                lazyColumnState.animateScrollToItem(scrollTargetRow)
+                val cumOffsets = geometry.rowCumOffsetPx
+                val currentPx = cumOffsets.getOrElse(lazyColumnState.firstVisibleItemIndex) { 0f } +
+                    lazyColumnState.firstVisibleItemScrollOffset
+                val targetPx = lazyColumnState.targetOffsetPx(
+                    index = scrollTargetRow,
+                    currentPx = currentPx,
+                    estimatedPx = cumOffsets.getOrElse(scrollTargetRow) { 0f },
+                    maxScrollPx = geometry.maxVerticalScrollPx
+                )
+                scrollAnimator.scrollToIndex(
+                    lazyColumnState, scrollTargetRow, currentPx, targetPx, geometry.viewportHeightPx
+                )
             }
         }
 
