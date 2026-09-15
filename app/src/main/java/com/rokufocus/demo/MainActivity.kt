@@ -58,12 +58,14 @@ import com.rokufocus.DefaultRokuFocusConfig
 import com.rokufocus.RokuColumnState
 import com.rokufocus.RokuFocusConfig
 import com.rokufocus.RokuFocusEscape
+import com.rokufocus.RokuFocusGrid
 import com.rokufocus.RokuFocusMode
 import com.rokufocus.RokuLazyColumn
 import com.rokufocus.RokuLazyRow
 import com.rokufocus.RokuNavKey
 import com.rokufocus.rememberRokuColumnState
 import com.rokufocus.rememberRokuFocusListState
+import com.rokufocus.rememberRokuGridState
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -89,6 +91,7 @@ private enum class Screen(val label: String, val icon: String) {
     STATE("State", "S"),
     WRAP("Wrap", "W"),
     FLOAT("Float", "F"),
+    GRID("Grid", "G"),
     PLAIN("Plain", "P"),
 }
 
@@ -194,6 +197,7 @@ fun StreamFocusDemoScreen() {
                     Screen.STATE   -> RowStateContent()
                     Screen.WRAP    -> WrapAroundContent()
                     Screen.FLOAT   -> FloatingFocusContent(detailOpen = detailVisible, onOpenDetail = openDetail)
+                    Screen.GRID    -> GridContent(detailOpen = detailVisible, onOpenDetail = openDetail)
                     Screen.PLAIN   -> PlainContent()
                 }
             }
@@ -722,6 +726,54 @@ private val floatingRows: List<RowDef> = List(12) { i ->
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GRID — RokuFocusGrid, floating by default
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun GridContent(
+    detailOpen: Boolean = false,
+    onOpenDetail: (MovieItem) -> Unit = {}
+) {
+    val gridState = rememberRokuGridState(itemCount = gridMovies.size, columns = GRID_COLUMNS)
+    LaunchedEffect(detailOpen) {
+        if (!detailOpen) {
+            delay(120)
+            gridState.requestFocus()
+        }
+    }
+
+    ScreenShell(
+        title = "Grid",
+        subtitle = "RokuFocusGrid · $GRID_COLUMNS columns · floats by default, scrolls only when the selection leaves the visible rows"
+    ) {
+        RokuFocusGrid(
+            state = gridState,
+            itemHeight = 220.dp,
+            modifier = Modifier.fillMaxSize(),
+            config = DefaultRokuFocusConfig.copy(
+                focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
+            ),
+            contentPadding = PaddingValues(start = 24.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
+            itemSpacing = 14.dp,
+            rowSpacing = 16.dp,
+            onItemClicked = { index -> onOpenDetail(gridMovies[index]) },
+            itemKey = { index -> gridMovies[index].id },
+            itemContentDescription = { index -> gridMovies[index].title },
+        ) { index, isFocused ->
+            // The grid hands each cell its width; the card fills it.
+            PortraitCard(gridMovies[index], isFocused, Modifier.fillMaxSize())
+        }
+    }
+}
+
+private const val GRID_COLUMNS = 5
+
+private val gridMovies: List<MovieItem> = baseRows
+    .flatMap { it.items }
+    .distinctBy { it.id }
+    .take(60)
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 5. PLAIN — Standard LazyColumn + LazyRow for comparison
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -862,6 +914,14 @@ private fun SidebarItem(
 private fun FloatingFocusContentPreview() {
     RokuFocusTheme(darkTheme = true, dynamicColor = false) {
         FloatingFocusContent()
+    }
+}
+
+@Preview(widthDp = 960, heightDp = 540)
+@Composable
+private fun GridContentPreview() {
+    RokuFocusTheme(darkTheme = true, dynamicColor = false) {
+        GridContent()
     }
 }
 
