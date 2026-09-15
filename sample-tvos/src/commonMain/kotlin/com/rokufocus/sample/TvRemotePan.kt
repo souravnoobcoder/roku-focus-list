@@ -30,4 +30,7 @@ object TvRemotePan {
      * compare against them.
      */
     var screenScale: Float = 1f
+
+    /** Refresh rate of the panel the app draws to, for judging frame gaps. 50 on a PAL-region TV. */
+    var displayRefreshHz: Int = 60
 }

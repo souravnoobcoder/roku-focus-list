@@ -34,7 +34,7 @@ internal enum class PanAxis { Horizontal, Vertical }
  */
 internal class RemoteNavigator(
     private val scope: CoroutineScope,
-    private val config: RokuFocusConfig,
+    private val config: (PanAxis) -> RokuFocusConfig,
     private val columnState: RokuColumnState,
     private val rowStates: () -> List<RokuFocusListState>,
     private val stepPoints: (PanAxis) -> Float,
@@ -94,8 +94,9 @@ internal class RemoteNavigator(
     private fun release(velocityX: Float, velocityY: Float) {
         val current = axis ?: dominant(velocityX, velocityY)
         val velocity = along(current, velocityX, velocityY)
+        val flingConfig = config(current)
         val flingSteps =
-            if (abs(velocity) < config.swipeVelocityThreshold) 0 else config.stepsForVelocity(velocity)
+            if (abs(velocity) < flingConfig.swipeVelocityThreshold) 0 else flingConfig.stepsForVelocity(velocity)
 
         val distance = along(current, totalX, totalY)
         val arrows = if (current == PanAxis.Horizontal) "◀▶" else "▲▼"
@@ -117,12 +118,13 @@ internal class RemoteNavigator(
 
     private fun move(axis: PanAxis, steps: Int): Boolean {
         var moved = false
+        val moveConfig = config(axis)
         when (axis) {
             PanAxis.Horizontal -> rowStates().getOrNull(columnState.selectedRowIndex)?.let { row ->
-                rokuMoveBy(row, config, steps, onSelected = { moved = true })
+                rokuMoveBy(row, moveConfig, steps, onSelected = { moved = true })
             }
 
-            PanAxis.Vertical -> rokuMoveRowsBy(columnState, config, steps, onSelected = { moved = true })
+            PanAxis.Vertical -> rokuMoveRowsBy(columnState, moveConfig, steps, onSelected = { moved = true })
         }
         println("[roku] move axis=$axis steps=$steps moved=$moved row=${columnState.selectedRowIndex}")
         return moved
@@ -144,5 +146,5 @@ internal class RemoteNavigator(
 private const val AxisLockPoints = 24f
 
 /** Gap before the first coasting item, then each gap is this much longer than the last. */
-private const val FirstFlingDelayMs = 60f
-private const val FlingDelayGrowth = 1.45f
+private const val FirstFlingDelayMs = 90f
+private const val FlingDelayGrowth = 1.5f

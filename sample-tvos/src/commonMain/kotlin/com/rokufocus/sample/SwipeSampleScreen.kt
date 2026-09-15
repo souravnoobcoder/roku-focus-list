@@ -60,9 +60,8 @@ private val RowSpacing = 20.dp
 private val Accent = Color(0xFF7DE2D1)
 
 /**
- * Navigation behaviour, shared by the column and the swipe handler so a flick and a D-pad press
- * obey the same wrap, escape and velocity rules. The swipe knobs are left at their defaults on
- * purpose — the point of the sample is that velocity scaling works with no tuning.
+ * Navigation behaviour shared by the column and the swipe handler, so a flick and a D-pad press
+ * obey the same wrap and escape rules.
  */
 private val SampleConfig = RokuFocusConfig(
     highlightAnimationSpec = RokuAnimationSpec.Smooth,
@@ -70,6 +69,25 @@ private val SampleConfig = RokuFocusConfig(
     // The grid is the whole screen; there is nowhere for focus to escape to.
     focusEscape = RokuFocusEscape.None,
 )
+
+/**
+ * Fling curves in the points per second a Siri Remote actually reports, measured on an Apple TV HD:
+ * a relaxed flick lifts off at 4,000–8,000 pt/s and a hard one at 15,000–20,000. The library's
+ * defaults are in no particular unit and would max every flick out, so the sample re-bases them:
+ * a gentle rail flick coasts nothing, a relaxed one a card, a hard one three or four. Rows are
+ * bigger moves, so a vertical flick coasts at most two of them.
+ */
+private val RowSwipeConfig =
+    SampleConfig.copy(swipeVelocityThreshold = 3000f, swipeSensitivity = 0.5f, swipeMaxSteps = 4)
+private val ColumnSwipeConfig =
+    SampleConfig.copy(swipeVelocityThreshold = 5000f, swipeSensitivity = 0.3f, swipeMaxSteps = 2)
+
+/**
+ * Touchpad travel per item while dragging, in item pitches. Above 1 so a full swipe across the pad
+ * (roughly 1,000–1,800 pt) walks two or three cards rather than four, and rows slower still.
+ */
+private const val HorizontalStepScale = 1.15f
+private const val VerticalStepScale = 1.5f
 
 /**
  * Apple TV sample: the same fixed-focus grid the other samples show, driven by the **Siri Remote
@@ -88,7 +106,7 @@ private val SampleConfig = RokuFocusConfig(
 fun SwipeSampleScreen(modifier: Modifier = Modifier) {
     val columnState = rememberRokuColumnState()
     val rowStates = sections.map { (title, items) ->
-        key(title) { rememberRokuFocusListState(itemCount = items.size, focusSlot = 1) }
+        key(title) { rememberRokuFocusListState(itemCount = items.size) }
     }
 
     val rows = sections.mapIndexed { rowIndex, (title, items) ->
@@ -116,11 +134,13 @@ fun SwipeSampleScreen(modifier: Modifier = Modifier) {
     val navigator = remember(columnState, density) {
         // One item of on-screen travel per item moved, in the points the touchpad reports.
         val pointsPerPx = 1f / TvRemotePan.screenScale
-        val horizontalStep = with(density) { (CardWidth + CardSpacing).toPx() } * pointsPerPx
-        val verticalStep = with(density) { (RowHeaderHeight + CardHeight + RowSpacing).toPx() } * pointsPerPx
+        val horizontalStep =
+            with(density) { (CardWidth + CardSpacing).toPx() } * pointsPerPx * HorizontalStepScale
+        val verticalStep =
+            with(density) { (RowHeaderHeight + CardHeight + RowSpacing).toPx() } * pointsPerPx * VerticalStepScale
         RemoteNavigator(
             scope = scope,
-            config = SampleConfig,
+            config = { axis -> if (axis == PanAxis.Horizontal) RowSwipeConfig else ColumnSwipeConfig },
             columnState = columnState,
             rowStates = { currentRowStates.value },
             stepPoints = { axis -> if (axis == PanAxis.Horizontal) horizontalStep else verticalStep },
@@ -228,7 +248,7 @@ private fun GestureReadoutPreview() {
     Box(modifier = Modifier.background(Color(0xFF0B0B0B))) {
         GestureReadout(
             gesture = "◀▶ drag 612 pt → 1 step · flick 2310 pt/s → 3 steps",
-            frames = "59 fps · worst frame 21 ms · 1 missed vsync",
+            frames = "50 fps on a 50 Hz panel · worst frame 21 ms · 0 missed vsync",
         )
     }
 }

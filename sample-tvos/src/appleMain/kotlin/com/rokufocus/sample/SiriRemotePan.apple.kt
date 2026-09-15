@@ -69,7 +69,13 @@ private val panTarget = SiriRemotePanTarget()
 /** Attaches the pan recogniser to the Compose host view. */
 @OptIn(ExperimentalForeignApi::class)
 fun installSiriRemotePan(view: UIView) {
-    TvRemotePan.screenScale = UIScreen.mainScreen.scale.toFloat()
+    val screen = UIScreen.mainScreen
+    TvRemotePan.screenScale = screen.scale.toFloat()
+    TvRemotePan.displayRefreshHz = screen.maximumFramesPerSecond.toInt()
+    println(
+        "[roku] display scale=${TvRemotePan.screenScale} maxFps=${TvRemotePan.displayRefreshHz} " +
+            "points=${screen.bounds.useContents { "${size.width.toInt()}x${size.height.toInt()}" }}"
+    )
     val recognizer = UIPanGestureRecognizer(
         target = panTarget,
         action = NSSelectorFromString("handlePan:"),
