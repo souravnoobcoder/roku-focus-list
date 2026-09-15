@@ -41,6 +41,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import kotlin.math.sign
+import kotlin.math.sqrt
 import com.rokufocus.DefaultFocusHighlight
 import com.rokufocus.RokuAnimationSpec
 import com.rokufocus.RokuColumnRowConfig
@@ -101,10 +104,15 @@ private const val MaxDragGain = 2f
 
 /**
  * The focus-movement hint: how far the focused card leans toward the thumb at a full step of
- * pending travel, and how much it tilts. Small on purpose — it says "I felt that", not "I moved".
+ * pending travel, and how much it tilts. The response is a square root of the pending fraction,
+ * so a brush of the pad already reads as a lean (a fifth of a step gives almost half the travel)
+ * while the last stretch before a move adds little. Small on purpose — it says "I felt that", not
+ * "I moved".
  */
-private val HintTravel = 10.dp
-private const val HintTiltDegrees = 4f
+private val HintTravel = 12.dp
+private const val HintTiltDegrees = 5f
+
+private fun shapeLean(fraction: Float): Float = sign(fraction) * sqrt(abs(fraction))
 
 private fun dragGain(speed: Float): Float {
     val t = ((speed - GainStartsAtPtPerSec) / (GainMaxAtPtPerSec - GainStartsAtPtPerSec)).coerceIn(0f, 1f)
@@ -365,10 +373,12 @@ private fun Modifier.focusHint(hint: State<Offset>?, travelPx: Float): Modifier 
     if (hint == null) return this
     return graphicsLayer {
         val lean = hint.value
-        translationX = lean.x * travelPx
-        translationY = lean.y * travelPx
-        rotationY = lean.x * HintTiltDegrees
-        rotationX = -lean.y * HintTiltDegrees
+        val x = shapeLean(lean.x)
+        val y = shapeLean(lean.y)
+        translationX = x * travelPx
+        translationY = y * travelPx
+        rotationY = x * HintTiltDegrees
+        rotationX = -y * HintTiltDegrees
     }
 }
 

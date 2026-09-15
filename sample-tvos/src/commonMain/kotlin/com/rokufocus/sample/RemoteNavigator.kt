@@ -17,8 +17,10 @@ internal enum class PanAxis { Horizontal, Vertical }
  *   the finger's speed, so a hard swipe crosses several items while a careful one walks them.
  * - **Small movement is never lost.** Travel that has not yet reached a full step is reported
  *   through [onHint] as a fraction of a step in [-1, 1] per axis, so the focused card can lean
- *   toward the thumb and spring back — the native focus-movement hint. At the end of a row the
- *   fraction pins at full pull instead of winding up.
+ *   toward the thumb and spring back — the native focus-movement hint. It starts with the very
+ *   first report, before the contact has travelled far enough to commit to an axis, so even a
+ *   brush of the pad is answered. At the end of a row the fraction pins at full pull instead of
+ *   winding up.
  *
  * Direction is the screen's: swiping right moves the selection to the right, swiping down moves
  * it down.
@@ -62,7 +64,12 @@ internal class RemoteNavigator(
         val current: PanAxis
         val delta: Float
         if (locked == null) {
-            if (totalX * totalX + totalY * totalY < AxisLockPoints * AxisLockPoints) return
+            if (totalX * totalX + totalY * totalY < AxisLockPoints * AxisLockPoints) {
+                // Not committed to an axis yet, but the thumb is moving: lean, do not move.
+                val guess = dominant(totalX, totalY)
+                onHint(hintFor(guess, along(guess, totalX, totalY)))
+                return
+            }
             current = dominant(totalX, totalY)
             axis = current
             // The travel that locked the axis is real travel too.
@@ -93,10 +100,12 @@ internal class RemoteNavigator(
         }
     }
 
-    private fun hint(current: PanAxis) {
-        val step = stepPoints(current)
-        val fraction = if (step <= 0f) 0f else (travel / step).coerceIn(-1f, 1f)
-        onHint(if (current == PanAxis.Horizontal) Offset(fraction, 0f) else Offset(0f, fraction))
+    private fun hint(current: PanAxis) = onHint(hintFor(current, travel))
+
+    private fun hintFor(axis: PanAxis, pendingTravel: Float): Offset {
+        val step = stepPoints(axis)
+        val fraction = if (step <= 0f) 0f else (pendingTravel / step).coerceIn(-1f, 1f)
+        return if (axis == PanAxis.Horizontal) Offset(fraction, 0f) else Offset(0f, fraction)
     }
 
     private fun release() {
@@ -132,5 +141,8 @@ internal class RemoteNavigator(
     private fun plural(count: Int): String = if (count == 1) "" else "s"
 }
 
-/** Travel before a contact commits to an axis; below this a touch is a rest or a click roll. */
-private const val AxisLockPoints = 24f
+/**
+ * Travel before a contact commits to an axis and can move the selection. Below it the thumb only
+ * leans the card, so a click that rolls a little never moves focus but still gets an answer.
+ */
+private const val AxisLockPoints = 16f
