@@ -5,6 +5,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -37,8 +38,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
@@ -49,10 +52,13 @@ import com.rokufocus.RokuAnimationSpec
 import com.rokufocus.RokuColumnRowConfig
 import com.rokufocus.RokuFocusConfig
 import com.rokufocus.RokuFocusEscape
+import com.rokufocus.RokuFocusGrid
+import com.rokufocus.RokuFocusMode
 import com.rokufocus.RokuLazyColumn
 import com.rokufocus.RokuLazyRow
 import com.rokufocus.rememberRokuColumnState
 import com.rokufocus.rememberRokuFocusListState
+import com.rokufocus.rememberRokuGridState
 
 private data class Title(val id: Int, val name: String)
 
@@ -71,6 +77,10 @@ private val CardSpacing = 14.dp
 private val RowHeaderHeight = 30.dp
 private val RowSpacing = 20.dp
 private val RailPadding = PaddingValues(start = 48.dp, end = 48.dp)
+private const val GridColumns = 5
+private const val GridCellCount = 60
+private val GridCellHeight = 110.dp
+private val GridSpacing = 14.dp
 private val Accent = Color(0xFF7DE2D1)
 
 /**
@@ -120,20 +130,36 @@ private fun dragGain(speed: Float): Float {
     return 1f + (MaxDragGain - 1f) * eased
 }
 
-/** The three ways to put the library on screen; Play/Pause on the remote cycles through them. */
+/** The four ways to put the library on screen. */
 private enum class Layout(val title: String) {
     ColumnDsl("RokuLazyColumn · row { } DSL"),
     ColumnState("RokuLazyColumn · state-based rows"),
-    StandaloneRow("RokuLazyRow · standalone, hoisted state");
+    StandaloneRow("RokuLazyRow · standalone, hoisted state"),
+    Grid("RokuFocusGrid · 5 columns"),
+}
 
-    fun next(): Layout = entries[(ordinal + 1) % entries.size]
+/**
+ * Every layout in both focus modes; Play/Pause on the remote steps through them. The grid comes
+ * Floating first because that is its default.
+ */
+private data class Scene(val layout: Layout, val mode: RokuFocusMode) {
+    val title: String get() = "${layout.title} · $mode"
+}
+
+private val Scenes: List<Scene> = Layout.entries.flatMap { layout ->
+    val modes = if (layout == Layout.Grid) {
+        listOf(RokuFocusMode.Floating, RokuFocusMode.Static)
+    } else {
+        listOf(RokuFocusMode.Static, RokuFocusMode.Floating)
+    }
+    modes.map { Scene(layout, it) }
 }
 
 /** What every layout needs from the host: the hint to lean with, and the navigator's plumbing. */
 private class SwipeHost(
     val hint: State<Offset>,
     val hintTravelPx: Float,
-    val stepPoints: (PanAxis) -> Float,
+    val pointsPerPx: Float,
     val onHint: (Offset) -> Unit,
     val onReport: (String) -> Unit,
 )
@@ -146,14 +172,16 @@ private class SwipeHost(
  * turns it into selection moves the way the native focus engine does: the highlight follows the
  * thumb while it is down, a fast thumb covers more ground, nothing moves once it lifts, and travel
  * too small to change focus leans the focused card toward the thumb so it is never mistaken for a
- * lost gesture. The same navigator drives all three layouts through a [SwipeTarget]: a column's
+ * lost gesture. The same navigator drives all four layouts through a [SwipeTarget]: a column's
  * horizontal swipes go through `rokuMoveItemsBy` on the column state, so the `row { }` DSL — which
- * keeps its rows' states private — works exactly like the state-based overload. Under the title,
- * one line reports the last gesture and another the frame timing it produced.
+ * keeps its rows' states private — works exactly like the state-based overload. Each layout is
+ * shown in both focus modes. Under the title, one line reports the last gesture and another the
+ * frame timing it produced.
  */
 @Composable
 fun SwipeSampleScreen(modifier: Modifier = Modifier) {
-    var layout by remember { mutableStateOf(Layout.ColumnDsl) }
+    var sceneIndex by remember { mutableIntStateOf(0) }
+    val scene = Scenes[sceneIndex]
     var gestureReport by remember { mutableStateOf(IdleReport) }
     var gestureCount by remember { mutableIntStateOf(0) }
     val frameReport = rememberFrameReport(gestureCount)
@@ -169,15 +197,10 @@ fun SwipeSampleScreen(modifier: Modifier = Modifier) {
 
     val density = LocalDensity.current
     val host = remember(density) {
-        val pointsPerPx = 1f / TvRemotePan.screenScale
-        val horizontalStep =
-            with(density) { (CardWidth + CardSpacing).toPx() } * pointsPerPx * HorizontalStepScale
-        val verticalStep =
-            with(density) { (RowHeaderHeight + CardHeight + RowSpacing).toPx() } * pointsPerPx * VerticalStepScale
         SwipeHost(
             hint = hint,
             hintTravelPx = with(density) { HintTravel.toPx() },
-            stepPoints = { axis -> if (axis == PanAxis.Horizontal) horizontalStep else verticalStep },
+            pointsPerPx = 1f / TvRemotePan.screenScale,
             onHint = { hintTarget = it },
             onReport = { report ->
                 gestureReport = report
@@ -192,7 +215,7 @@ fun SwipeSampleScreen(modifier: Modifier = Modifier) {
             .background(Color(0xFF0B0B0B))
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.MediaPlayPause) {
-                    layout = layout.next()
+                    sceneIndex = (sceneIndex + 1) % Scenes.size
                     gestureReport = IdleReport
                     true
                 } else {
@@ -202,28 +225,42 @@ fun SwipeSampleScreen(modifier: Modifier = Modifier) {
     ) {
         Column {
             BasicText(
-                text = layout.title,
+                text = scene.title,
                 style = TextStyle(color = Color.White, fontSize = 30.sp),
                 modifier = Modifier.padding(start = 48.dp, top = 40.dp),
             )
             GestureReadout(gestureReport, frameReport)
 
-            when (layout) {
-                Layout.ColumnDsl -> ColumnDslLayout(host)
-                Layout.ColumnState -> ColumnStateLayout(host)
-                Layout.StandaloneRow -> StandaloneRowLayout(host)
+            // Keyed so a scene change starts each layout fresh instead of reusing a neighbour's
+            // remembered states under a different focus mode.
+            key(scene) {
+                when (scene.layout) {
+                    Layout.ColumnDsl -> ColumnDslLayout(host, scene.mode)
+                    Layout.ColumnState -> ColumnStateLayout(host, scene.mode)
+                    Layout.StandaloneRow -> StandaloneRowLayout(host, scene.mode)
+                    Layout.Grid -> GridLayout(host, scene.mode)
+                }
             }
         }
     }
 }
 
-private const val IdleReport = "Drag the remote, or use the D-pad · Play/Pause switches layout"
+private const val IdleReport = "Drag the remote, or use the D-pad · Play/Pause switches layout and focus mode"
+
+/** Touchpad travel per step for the rails: a fraction of a card sideways, a row pitch down. */
+private fun railStepPoints(density: Density, pointsPerPx: Float): (PanAxis) -> Float {
+    val horizontal = with(density) { (CardWidth + CardSpacing).toPx() } * pointsPerPx * HorizontalStepScale
+    val vertical =
+        with(density) { (RowHeaderHeight + CardHeight + RowSpacing).toPx() } * pointsPerPx * VerticalStepScale
+    return { axis -> if (axis == PanAxis.Horizontal) horizontal else vertical }
+}
 
 /** The column DSL: sizes are measured from the first card and the header, nothing declared. */
 @Composable
-private fun ColumnDslLayout(host: SwipeHost) {
+private fun ColumnDslLayout(host: SwipeHost, mode: RokuFocusMode) {
     val columnState = rememberRokuColumnState()
-    BindRemote(remember(columnState) { ColumnSwipeTarget(columnState, SampleConfig) }, host)
+    val density = LocalDensity.current
+    BindRemote(remember(columnState) { ColumnSwipeTarget(columnState, SampleConfig) }, host, railStepPoints(density, host.pointsPerPx))
     RequestFocusWhenReady(columnState) { columnState.requestFocus() }
 
     RokuLazyColumn(
@@ -233,12 +270,14 @@ private fun ColumnDslLayout(host: SwipeHost) {
         rowSpacing = RowSpacing,
         focusHighlight = { isFocused -> LeaningHighlight(isFocused, host) },
         onItemSelected = ::logKeyMove,
+        verticalFocusMode = mode,
     ) {
         sections.forEach { (title, items) ->
             row(
                 itemSpacing = CardSpacing,
                 contentPadding = RailPadding,
                 key = title,
+                focusMode = mode,
                 header = { isRowFocused -> RowHeader(title, isRowFocused) },
             ) {
                 items(items, key = { it.id }, contentDescription = { it.name }) { item, isFocused ->
@@ -251,10 +290,11 @@ private fun ColumnDslLayout(host: SwipeHost) {
 
 /** The state-based column: every size declared, one hoisted state per rail. */
 @Composable
-private fun ColumnStateLayout(host: SwipeHost) {
+private fun ColumnStateLayout(host: SwipeHost, mode: RokuFocusMode) {
     val columnState = rememberRokuColumnState()
+    val density = LocalDensity.current
     val rowStates = sections.map { (title, items) ->
-        key(title) { rememberRokuFocusListState(itemCount = items.size) }
+        key(title) { rememberRokuFocusListState(itemCount = items.size, focusMode = mode) }
     }
     val rows = sections.mapIndexed { rowIndex, (title, items) ->
         RokuColumnRowConfig(
@@ -268,7 +308,7 @@ private fun ColumnStateLayout(host: SwipeHost) {
             itemContentDescription = { index -> items[index].name },
         )
     }
-    BindRemote(remember(columnState) { ColumnSwipeTarget(columnState, SampleConfig) }, host)
+    BindRemote(remember(columnState) { ColumnSwipeTarget(columnState, SampleConfig) }, host, railStepPoints(density, host.pointsPerPx))
     RequestFocusWhenReady(columnState) { columnState.requestFocus() }
 
     RokuLazyColumn(
@@ -280,6 +320,7 @@ private fun ColumnStateLayout(host: SwipeHost) {
         focusHighlight = { isFocused -> LeaningHighlight(isFocused, host) },
         onItemSelected = ::logKeyMove,
         rowHeader = { rowIndex, isRowFocused -> RowHeader(sections[rowIndex].first, isRowFocused) },
+        verticalFocusMode = mode,
     ) { rowIndex, itemIndex, isFocused ->
         Card(sections[rowIndex].second[itemIndex].name, isFocused, host)
     }
@@ -287,10 +328,11 @@ private fun ColumnStateLayout(host: SwipeHost) {
 
 /** One rail on its own: the DSL overload with a hoisted state, so a swipe has a handle on it. */
 @Composable
-private fun StandaloneRowLayout(host: SwipeHost) {
+private fun StandaloneRowLayout(host: SwipeHost, mode: RokuFocusMode) {
     val (title, items) = sections.first()
-    val rowState = rememberRokuFocusListState(itemCount = items.size)
-    BindRemote(remember(rowState) { RowSwipeTarget(rowState, SampleConfig) }, host)
+    val rowState = rememberRokuFocusListState(itemCount = items.size, focusMode = mode)
+    val density = LocalDensity.current
+    BindRemote(remember(rowState) { RowSwipeTarget(rowState, SampleConfig) }, host, railStepPoints(density, host.pointsPerPx))
     RequestFocusWhenReady(rowState) { rowState.requestFocus() }
 
     Column {
@@ -310,11 +352,50 @@ private fun StandaloneRowLayout(host: SwipeHost) {
     }
 }
 
+/**
+ * A wall of cells, floating by default: the highlight walks the visible rows and the grid scrolls
+ * only when the selection would leave them. Cell width comes from the viewport, so the swipe step
+ * is derived from the same constraints the grid lays out against.
+ */
+@Composable
+private fun GridLayout(host: SwipeHost, mode: RokuFocusMode) {
+    val gridState = rememberRokuGridState(itemCount = GridCellCount, columns = GridColumns, focusMode = mode)
+    val density = LocalDensity.current
+    RequestFocusWhenReady(gridState) { gridState.requestFocus() }
+
+    val layoutDirection = LocalLayoutDirection.current
+    BoxWithConstraints {
+        val cellWidth = (maxWidth - RailPadding.calculateLeftPadding(layoutDirection) -
+            RailPadding.calculateRightPadding(layoutDirection) - GridSpacing * (GridColumns - 1)) / GridColumns
+        val horizontal = with(density) { (cellWidth + GridSpacing).toPx() } * host.pointsPerPx * HorizontalStepScale
+        val vertical = with(density) { (GridCellHeight + GridSpacing).toPx() } * host.pointsPerPx * VerticalStepScale
+        BindRemote(
+            remember(gridState) { GridSwipeTarget(gridState, SampleConfig) },
+            host,
+            remember(horizontal, vertical) { { axis: PanAxis -> if (axis == PanAxis.Horizontal) horizontal else vertical } },
+        )
+
+        RokuFocusGrid(
+            state = gridState,
+            itemHeight = GridCellHeight,
+            config = SampleConfig,
+            contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
+            itemSpacing = GridSpacing,
+            rowSpacing = GridSpacing,
+            focusHighlight = { isFocused -> LeaningHighlight(isFocused, host) },
+            onItemSelected = { index -> logKeyMove(index / GridColumns, index % GridColumns) },
+            itemContentDescription = { index -> "Title ${index + 1}" },
+        ) { index, isFocused ->
+            GridCell("Title ${index + 1}", isFocused, host)
+        }
+    }
+}
+
 /** Routes the remote to [target] while the calling layout is on screen. */
 @Composable
-private fun BindRemote(target: SwipeTarget, host: SwipeHost) {
-    val navigator = remember(target, host) {
-        RemoteNavigator(target, host.stepPoints, ::dragGain, host.onHint, host.onReport)
+private fun BindRemote(target: SwipeTarget, host: SwipeHost, stepPoints: (PanAxis) -> Float) {
+    val navigator = remember(target, host, stepPoints) {
+        RemoteNavigator(target, stepPoints, ::dragGain, host.onHint, host.onReport)
     }
     DisposableEffect(navigator) {
         val handler: (RemotePanEvent) -> Unit = navigator::onEvent
@@ -407,6 +488,21 @@ private fun RowHeader(text: String, isRowFocused: Boolean) {
     )
 }
 
+/** A grid cell fills the width the grid hands it; only the height is its own. */
+@Composable
+private fun GridCell(label: String, isFocused: Boolean, host: SwipeHost?) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .focusHint(if (isFocused) host?.hint else null, host?.hintTravelPx ?: 0f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isFocused) Color(0xFF2E2E2E) else Color(0xFF1A1A1A)),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(text = label, style = TextStyle(color = Color.White, fontSize = 15.sp))
+    }
+}
+
 @Composable
 private fun Card(label: String, isFocused: Boolean, host: SwipeHost?) {
     Box(
@@ -435,6 +531,15 @@ private fun GestureReadoutPreview() {
             gesture = "◀▶ drag 612 pt → 2 cards · peak 6,310 pt/s, gain ×1.4",
             frames = "50 fps on a 50 Hz panel · worst frame 21 ms · 0 missed vsync",
         )
+    }
+}
+
+@Preview
+@Composable
+private fun GridCellPreview() {
+    Row(modifier = Modifier.background(Color(0xFF0B0B0B)).padding(16.dp)) {
+        Box(Modifier.size(160.dp, GridCellHeight)) { GridCell("Title 1", isFocused = true, host = null) }
+        Box(Modifier.size(160.dp, GridCellHeight).padding(start = 14.dp)) { GridCell("Title 2", isFocused = false, host = null) }
     }
 }
 

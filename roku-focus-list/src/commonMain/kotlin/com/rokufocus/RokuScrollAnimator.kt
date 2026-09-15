@@ -5,6 +5,7 @@ import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.animateTo
 import androidx.compose.animation.core.copy
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.lazy.LazyListState
 import kotlin.math.abs
 
@@ -35,29 +36,40 @@ internal class RokuScrollAnimator {
         animation = AnimationState(0f)
     }
 
-    /**
-     * @param index The item [targetPx] aligns to; used when falling back to `animateScrollToItem`.
-     * @param currentPx Absolute scroll offset of the list right now.
-     * @param targetPx Absolute scroll offset to reach, already clamped to what the list can scroll.
-     * @param viewportPx Main-axis size of the viewport; 0 when the list has not been laid out yet.
-     */
+    /** [animateTo] for a lazy list, falling back to `animateScrollToItem(index)` for far jumps. */
     suspend fun scrollToIndex(
         listState: LazyListState,
         index: Int,
         currentPx: Float,
         targetPx: Float,
         viewportPx: Float
+    ) = animateTo(listState, currentPx, targetPx, viewportPx) { listState.animateScrollToItem(index) }
+
+    /**
+     * @param scrollable The list or grid to drive.
+     * @param currentPx Absolute scroll offset of the list right now.
+     * @param targetPx Absolute scroll offset to reach, already clamped to what the list can scroll.
+     * @param viewportPx Main-axis size of the viewport; 0 when the list has not been laid out yet.
+     * @param farJump Taken instead when the distance exceeds a viewport or nothing is laid out
+     *   yet — the caller's `animateScrollToItem`, whose teleporting suits that case.
+     */
+    suspend fun animateTo(
+        scrollable: ScrollableState,
+        currentPx: Float,
+        targetPx: Float,
+        viewportPx: Float,
+        farJump: suspend () -> Unit
     ) {
         if (viewportPx <= 0f || abs(targetPx - currentPx) > viewportPx) {
             reset()
-            listState.animateScrollToItem(index)
+            farJump()
             return
         }
 
         animation = animation.copy(value = currentPx)
         val forward = targetPx >= currentPx
         var scrolled = currentPx
-        listState.scroll {
+        scrollable.scroll {
             animation.animateTo(
                 targetValue = targetPx,
                 animationSpec = ScrollSpec,

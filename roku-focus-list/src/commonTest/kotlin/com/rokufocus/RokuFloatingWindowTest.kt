@@ -180,6 +180,15 @@ class RokuFloatingWindowTest {
     }
 
     @Test
+    fun aMultiRowJumpAdvancesTheVerticalWindowMinimallyInOneHop() {
+        // A swipe from the top straight to the last row: row 5 bottom = 650, and row 4 (top 440)
+        // is the first anchor that fits it in the 380px window — reached in one hop, not row by row.
+        assertEquals(4, contain(anchor = 0, selected = 5))
+        // And a jump back above the window retreats to the selected row itself.
+        assertEquals(0, contain(anchor = 4, selected = 0))
+    }
+
+    @Test
     fun verticalWindowRetreatsToTheSelectedRow() {
         assertEquals(1, contain(anchor = 4, selected = 1))
     }

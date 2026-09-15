@@ -506,6 +506,45 @@ window has no fixed slot — so it is ignored in `Floating`.
 
 ---
 
+## Grid (`RokuFocusGrid`)
+
+A wall of equal-size cells — an "all titles" screen, a channel guide, a settings grid — N columns
+wide and scrolling vertically, with one highlight overlay:
+
+```kotlin
+val grid = rememberRokuGridState(itemCount = movies.size, columns = 5)
+
+RokuFocusGrid(
+    state = grid,
+    itemHeight = 160.dp,
+    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 24.dp),
+    itemSpacing = 14.dp,
+    rowSpacing = 14.dp,
+    onItemClicked = { index -> open(movies[index]) },
+) { index, isFocused ->
+    PosterCard(movies[index], isFocused)
+}
+```
+
+Cell width is whatever is left after the padding and the gaps, split evenly across the columns, so
+the grid fills the viewport at any width. LEFT/RIGHT move along the row and stop at its ends (with
+`wrapAround` they flow into the neighbouring row like reading); UP/DOWN move by whole rows keeping
+the column, and a shorter last row hands out its last cell.
+
+Unlike the rails, **a grid floats by default**: the highlight walks the visible cells and the grid
+scrolls only when the selection would leave them, which is how a wall of posters is browsed
+everywhere. `rememberRokuGridState(focusMode = RokuFocusMode.Static)` parks the selected row at the
+top instead and scrolls on every row move. The state follows the same rules as the rails: the
+selection is a raw requested index coerced on read, and the floating window is a raw anchor row
+contained at write time — so a grid that is still loading, or one that shrank, comes back where it
+was. `Saver` and `rememberRokuGridState` handle restoration.
+
+Touchpad input goes through `rokuMoveColumnsBy(gridState, …)` and `rokuMoveRowsBy(gridState, …)`,
+or `gridState.moveColumnsBy` / `moveRowsBy` / `moveBy` (reading order) directly — see
+[Touchpad remotes](#touchpad-remotes-multi-step-moves-and-swipe-velocity).
+
+---
+
 ## Focus Slot
 
 In `Static` mode, control where the highlight sits within the visible window:
@@ -773,11 +812,12 @@ library's users.
 |---|---|
 | `RokuLazyRow` | Horizontal fixed-focus row. DSL variant auto-measures width; state variant takes explicit `itemWidth`. |
 | `RokuLazyColumn` | Vertical + horizontal OTT grid. DSL variant manages per-row state internally; state variant takes `List<RokuColumnRowConfig>`. |
+| `RokuFocusGrid` | N-column wall of equal cells, scrolling vertically. Floats by default. Takes a `RokuGridState`. |
 | `RokuLazyColumnScope.row` | A rail of equal-size cards. Sizes explicit, or measured from the first item when omitted. |
 | `RokuLazyColumnScope.customRow` | Anything else, with LEFT/RIGHT/ENTER delegated to it. |
 | `DefaultFocusHighlight` | Default white rounded-border highlight. `BoxScope` extension, fully replaceable. |
 | `Modifier.rokuKeyHandler` | Low-level D-pad handler, for wiring your own container. |
-| `rokuMoveBy` / `rokuMoveRowsBy` / `rokuMoveItemsBy` | Edge-aware multi-step moves for touchpad input: a row, a column's rows, a column's active row. Escape policy applied once per move. |
+| `rokuMoveBy` / `rokuMoveRowsBy` / `rokuMoveItemsBy` / `rokuMoveColumnsBy` | Edge-aware multi-step moves for touchpad input: a row, a column's rows, a column's active row, a grid's row and rows. Escape policy applied once per move. |
 
 ### Types
 
@@ -785,6 +825,7 @@ library's users.
 |---|---|
 | `RokuColumnState` | Which row is selected; focus control; observable `hasFocus`; `activeRowState` and `moveItemsBy` / `moveRowsBy` for driving it from outside. |
 | `RokuFocusListState` | Which item of a row is selected; `moveBy` for coalesced multi-step moves. |
+| `RokuGridState` | Which cell of a grid is selected (linear index; `selectedRow` / `selectedColumn` derived); `moveColumnsBy` / `moveRowsBy` / `moveBy`; owns `columns` and the focus mode. |
 | `RokuFocusConfig` | Navigation behaviour. |
 | `RokuFocusMode` | Per-axis `Static` (fixed slot, content scrolls) vs `Floating` (highlight walks, scrolls at window edges). |
 | `RokuFocusEscape` | Per-edge focus escape. |

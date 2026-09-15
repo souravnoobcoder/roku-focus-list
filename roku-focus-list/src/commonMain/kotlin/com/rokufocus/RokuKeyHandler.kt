@@ -189,6 +189,57 @@ fun rokuMoveItemsBy(
 }
 
 /**
+ * Applies one velocity-scaled swipe **along the row of a grid**, as a single coalesced move — the
+ * [RokuFocusGrid] counterpart of [rokuMoveBy]. Clamps at the row's ends, or with
+ * [RokuFocusConfig.wrapAround] flows into the neighbouring rows in reading order.
+ *
+ * @return whether the gesture was consumed. False means the move ran into a start/end edge that
+ *   [RokuFocusConfig.focusEscape] leaves open.
+ */
+fun rokuMoveColumnsBy(
+    state: RokuGridState,
+    config: RokuFocusConfig,
+    steps: Int,
+    onSelected: ((index: Int) -> Unit)? = null,
+    onBoundaryHit: (() -> Unit)? = null
+): Boolean {
+    if (steps == 0) return false
+    state.keyRepeat.reset()
+
+    val consumed = state.moveColumnSteps(steps, config.wrapAround)
+    if (consumed != 0) onSelected?.invoke(state.selectedIndex)
+    if (consumed == abs(steps)) return true
+
+    if (consumed == 0) onBoundaryHit?.invoke()
+    return !config.focusEscape.allowsLeaving(Orientation.Horizontal, forward = steps > 0)
+}
+
+/**
+ * Applies one velocity-scaled swipe **up or down a grid**, as a single coalesced move that keeps
+ * the column — the [RokuFocusGrid] counterpart of the column's [rokuMoveRowsBy].
+ *
+ * @return whether the gesture was consumed. False means the move ran into the top or bottom edge
+ *   and [RokuFocusConfig.focusEscape] leaves it open.
+ */
+fun rokuMoveRowsBy(
+    state: RokuGridState,
+    config: RokuFocusConfig,
+    steps: Int,
+    onSelected: ((index: Int) -> Unit)? = null,
+    onBoundaryHit: (() -> Unit)? = null
+): Boolean {
+    if (steps == 0) return false
+    state.keyRepeat.reset()
+
+    val consumed = state.moveRowSteps(steps, config.wrapAround)
+    if (consumed != 0) onSelected?.invoke(state.selectedIndex)
+    if (consumed == abs(steps)) return true
+
+    if (consumed == 0) onBoundaryHit?.invoke()
+    return !config.focusEscape.allowsLeaving(Orientation.Vertical, forward = steps > 0)
+}
+
+/**
  * Applies one horizontal step to [state], honouring [RokuFocusConfig.wrapAround].
  *
  * @return whether the selection actually changed.

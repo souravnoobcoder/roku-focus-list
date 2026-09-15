@@ -388,4 +388,48 @@ class RokuMoveByTest {
         assertTrue(c.moveItemsBy(1))
         assertEquals(0, c.keyRepeat.consecutivePresses)
     }
+
+    // ── moveBy in Floating mode: the window follows in one hop ──
+
+    @Test
+    fun aFloatingMultiStepMoveContainsTheWindowInOneHop() {
+        val s = RokuFocusListState(itemCount = 30, focusMode = RokuFocusMode.Floating)
+            .also { it.visibleCount = 4 }
+
+        assertTrue(s.moveBy(6))
+        assertEquals(6, s.selectedIndex)
+        assertEquals(3, s.windowStart, "the selection becomes the last visible item")
+        assertEquals(3, s.highlightSlot)
+
+        assertTrue(s.moveBy(-5))
+        assertEquals(1, s.selectedIndex)
+        assertEquals(1, s.windowStart, "backward, it becomes the first visible item")
+        assertEquals(0, s.highlightSlot)
+
+        assertTrue(s.moveBy(2))
+        assertEquals(1, s.windowStart, "a move inside the window leaves it alone")
+        assertEquals(2, s.highlightSlot)
+    }
+
+    @Test
+    fun floatingMoveByThroughTheEdgeAwareHelperReportsOnce() {
+        val s = RokuFocusListState(itemCount = 10, initialIndex = 7, focusMode = RokuFocusMode.Floating)
+            .also { it.visibleCount = 4 }
+        val selections = mutableListOf<Int>()
+        rokuMoveBy(s, DefaultRokuFocusConfig, 5, onSelected = { selections += it })
+        assertEquals(listOf(9), selections)
+        assertEquals(6, s.windowStart, "clamped at the tail: 10 items, 4 visible")
+        assertEquals(3, s.highlightSlot)
+    }
+
+    @Test
+    fun floatingRowsByThroughTheColumnKeepsTheActiveRowWindow() {
+        val c = column(rowCount = 6)
+        val active = RokuFocusListState(itemCount = 30, focusMode = RokuFocusMode.Floating)
+            .also { it.visibleCount = 4 }
+        c.activeRowState = active
+        assertTrue(c.moveItemsBy(7))
+        assertEquals(4, active.windowStart)
+        assertEquals(3, active.highlightSlot)
+    }
 }

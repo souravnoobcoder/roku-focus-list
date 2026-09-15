@@ -3,7 +3,9 @@ package com.rokufocus.sample
 import com.rokufocus.RokuColumnState
 import com.rokufocus.RokuFocusConfig
 import com.rokufocus.RokuFocusListState
+import com.rokufocus.RokuGridState
 import com.rokufocus.rokuMoveBy
+import com.rokufocus.rokuMoveColumnsBy
 import com.rokufocus.rokuMoveItemsBy
 import com.rokufocus.rokuMoveRowsBy
 
@@ -29,6 +31,25 @@ internal class ColumnSwipeTarget(
     override fun moveItems(steps: Int): Boolean {
         var moved = false
         rokuMoveItemsBy(state, config, steps, onSelected = { _, _ -> moved = true })
+        return moved
+    }
+
+    override fun moveRows(steps: Int): Boolean {
+        var moved = false
+        rokuMoveRowsBy(state, config, steps, onSelected = { moved = true })
+        return moved
+    }
+}
+
+/** A grid: along the row for horizontal swipes, whole rows for vertical ones. */
+internal class GridSwipeTarget(
+    private val state: RokuGridState,
+    private val config: RokuFocusConfig,
+) : SwipeTarget {
+
+    override fun moveItems(steps: Int): Boolean {
+        var moved = false
+        rokuMoveColumnsBy(state, config, steps, onSelected = { moved = true })
         return moved
     }
 
