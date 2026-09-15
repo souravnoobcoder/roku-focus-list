@@ -655,14 +655,22 @@ scroll animations and N `onItemSelected` callbacks — and every prefetch or sav
 hanging off that callback fires N times too. The library coalesces this for you:
 
 ```kotlin
-rowState.moveBy(3)          // one selection change, one animation, one callback
-rowState.moveBy(-2)         // negative steps travel toward the start
-columnState.moveRowsBy(2)   // vertical equivalent; skips rows with nothing to select
+rowState.moveBy(3)           // one selection change, one animation, one callback
+rowState.moveBy(-2)          // negative steps travel toward the start
+columnState.moveRowsBy(2)    // vertical equivalent; skips rows with nothing to select
+columnState.moveItemsBy(3)   // within the column's active row — no row state needed
 
 // Edge-aware variants that also apply focusEscape / onBoundaryHit exactly once per move:
 rokuMoveBy(rowState, config, steps = 3, onSelected = { index -> /* ... */ })
 rokuMoveRowsBy(columnState, config, steps = -1)
+rokuMoveItemsBy(columnState, config, steps = 3, onSelected = { rowIndex, itemIndex -> /* ... */ })
 ```
+
+Every entry point has a handle for this. A `RokuLazyColumn` exposes the selected rail's state as
+`columnState.activeRowState`, so horizontal swipes go through the column state and the `row { }`
+DSL — which never hands out its rows' states — works exactly like the state-based overload. A
+standalone DSL `RokuLazyRow` takes an optional hoisted `state` for the same reason, while keeping
+its auto-measured item width.
 
 Moves clamp at the ends of a row — asking for more steps than remain lands on the last item. With
 `wrapAround` the move wraps only when the selection is *already* parked on the edge being pushed,
@@ -769,13 +777,14 @@ library's users.
 | `RokuLazyColumnScope.customRow` | Anything else, with LEFT/RIGHT/ENTER delegated to it. |
 | `DefaultFocusHighlight` | Default white rounded-border highlight. `BoxScope` extension, fully replaceable. |
 | `Modifier.rokuKeyHandler` | Low-level D-pad handler, for wiring your own container. |
+| `rokuMoveBy` / `rokuMoveRowsBy` / `rokuMoveItemsBy` | Edge-aware multi-step moves for touchpad input: a row, a column's rows, a column's active row. Escape policy applied once per move. |
 
 ### Types
 
 | Type | Description |
 |---|---|
-| `RokuColumnState` | Which row is selected; focus control; observable `hasFocus`. |
-| `RokuFocusListState` | Which item of a row is selected. |
+| `RokuColumnState` | Which row is selected; focus control; observable `hasFocus`; `activeRowState` and `moveItemsBy` / `moveRowsBy` for driving it from outside. |
+| `RokuFocusListState` | Which item of a row is selected; `moveBy` for coalesced multi-step moves. |
 | `RokuFocusConfig` | Navigation behaviour. |
 | `RokuFocusMode` | Per-axis `Static` (fixed slot, content scrolls) vs `Floating` (highlight walks, scrolls at window edges). |
 | `RokuFocusEscape` | Per-edge focus escape. |

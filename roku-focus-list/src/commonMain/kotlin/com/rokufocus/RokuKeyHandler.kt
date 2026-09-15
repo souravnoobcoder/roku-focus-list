@@ -156,6 +156,39 @@ fun rokuMoveRowsBy(
 }
 
 /**
+ * Applies one velocity-scaled swipe **within the active row of a column**, as a single coalesced
+ * move, for hosts that only hold the column's state — the `row { }` DSL never hands out its rows'
+ * states. Resolves [RokuColumnState.activeRowState] and behaves exactly like [rokuMoveBy] on it,
+ * escape policy included, so a consumer can wire horizontal swipes the same way for either
+ * [RokuLazyColumn] overload.
+ *
+ * @param onSelected Called at most once, with the row and the new item index, when the selection
+ *   changed.
+ * @return whether the gesture was consumed. False when the column has no active item row, or when
+ *   the move ran into a start/end edge that [RokuFocusConfig.focusEscape] leaves open.
+ */
+fun rokuMoveItemsBy(
+    state: RokuColumnState,
+    config: RokuFocusConfig,
+    steps: Int,
+    onSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    onBoundaryHit: (() -> Unit)? = null
+): Boolean {
+    if (steps == 0) return false
+    val row = state.activeRowState ?: return false
+    state.keyRepeat.reset()
+    val rowIndex = state.selectedRowIndex
+    return rokuMoveBy(
+        state = row,
+        config = config,
+        steps = steps,
+        orientation = Orientation.Horizontal,
+        onSelected = onSelected?.let { report -> { itemIndex -> report(rowIndex, itemIndex) } },
+        onBoundaryHit = onBoundaryHit
+    )
+}
+
+/**
  * Applies one horizontal step to [state], honouring [RokuFocusConfig.wrapAround].
  *
  * @return whether the selection actually changed.

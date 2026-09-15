@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateOffsetAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,18 +23,22 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rokufocus.DefaultFocusHighlight
@@ -42,6 +47,7 @@ import com.rokufocus.RokuColumnRowConfig
 import com.rokufocus.RokuFocusConfig
 import com.rokufocus.RokuFocusEscape
 import com.rokufocus.RokuLazyColumn
+import com.rokufocus.RokuLazyRow
 import com.rokufocus.rememberRokuColumnState
 import com.rokufocus.rememberRokuFocusListState
 
@@ -61,16 +67,17 @@ private val CardHeight = 140.dp
 private val CardSpacing = 14.dp
 private val RowHeaderHeight = 30.dp
 private val RowSpacing = 20.dp
+private val RailPadding = PaddingValues(start = 48.dp, end = 48.dp)
 private val Accent = Color(0xFF7DE2D1)
 
 /**
- * Navigation behaviour shared by the column and the touchpad handler, so a swipe and a D-pad press
- * obey the same wrap and escape rules.
+ * Navigation behaviour shared by every layout and the touchpad handler, so a swipe and a D-pad
+ * press obey the same wrap and escape rules.
  */
 private val SampleConfig = RokuFocusConfig(
     highlightAnimationSpec = RokuAnimationSpec.Smooth,
     hapticFeedback = false,
-    // The grid is the whole screen; there is nowhere for focus to escape to.
+    // Each layout fills the screen; there is nowhere for focus to escape to.
     focusEscape = RokuFocusEscape.None,
 )
 
@@ -105,41 +112,41 @@ private fun dragGain(speed: Float): Float {
     return 1f + (MaxDragGain - 1f) * eased
 }
 
+/** The three ways to put the library on screen; Play/Pause on the remote cycles through them. */
+private enum class Layout(val title: String) {
+    ColumnDsl("RokuLazyColumn · row { } DSL"),
+    ColumnState("RokuLazyColumn · state-based rows"),
+    StandaloneRow("RokuLazyRow · standalone, hoisted state");
+
+    fun next(): Layout = entries[(ordinal + 1) % entries.size]
+}
+
+/** What every layout needs from the host: the hint to lean with, and the navigator's plumbing. */
+private class SwipeHost(
+    val hint: State<Offset>,
+    val hintTravelPx: Float,
+    val stepPoints: (PanAxis) -> Float,
+    val onHint: (Offset) -> Unit,
+    val onReport: (String) -> Unit,
+)
+
 /**
- * Apple TV sample: the same fixed-focus grid the other samples show, driven by the **Siri Remote
- * touchpad** as well as the D-pad.
+ * Apple TV sample: the same fixed-focus rails in each of the library's layouts, driven by the
+ * **Siri Remote touchpad** as well as the D-pad. Play/Pause switches layout.
  *
  * Touchpad movement reaches the screen as a stream of [RemotePanEvent]s, and [RemoteNavigator]
  * turns it into selection moves the way the native focus engine does: the highlight follows the
  * thumb while it is down, a fast thumb covers more ground, nothing moves once it lifts, and travel
  * too small to change focus leans the focused card toward the thumb so it is never mistaken for a
- * lost gesture. Under the title, one line reports the last gesture and another the frame timing it
- * produced.
- *
- * Note the column is the **state-based** overload rather than the `row { }` DSL: a horizontal
- * swipe has to reach the focused row's state, and the DSL keeps each row's state to itself.
+ * lost gesture. The same navigator drives all three layouts through a [SwipeTarget]: a column's
+ * horizontal swipes go through `rokuMoveItemsBy` on the column state, so the `row { }` DSL — which
+ * keeps its rows' states private — works exactly like the state-based overload. Under the title,
+ * one line reports the last gesture and another the frame timing it produced.
  */
 @Composable
 fun SwipeSampleScreen(modifier: Modifier = Modifier) {
-    val columnState = rememberRokuColumnState()
-    val rowStates = sections.map { (title, items) ->
-        key(title) { rememberRokuFocusListState(itemCount = items.size) }
-    }
-
-    val rows = sections.mapIndexed { rowIndex, (title, items) ->
-        RokuColumnRowConfig(
-            state = rowStates[rowIndex],
-            itemWidth = CardWidth,
-            itemHeight = CardHeight,
-            itemSpacing = CardSpacing,
-            contentPadding = PaddingValues(start = 48.dp, end = 48.dp),
-            headerHeight = RowHeaderHeight,
-            key = title,
-            itemContentDescription = { index -> items[index].name },
-        )
-    }
-
-    var gestureReport by remember { mutableStateOf("Drag the remote, or use the D-pad") }
+    var layout by remember { mutableStateOf(Layout.ColumnDsl) }
+    var gestureReport by remember { mutableStateOf(IdleReport) }
     var gestureCount by remember { mutableIntStateOf(0) }
     val frameReport = rememberFrameReport(gestureCount)
 
@@ -152,22 +159,17 @@ fun SwipeSampleScreen(modifier: Modifier = Modifier) {
         label = "focus_hint",
     )
 
-    // rowStates is a fresh list every pass; the navigator is long-lived, so it reads the current
-    // list through a holder instead of being rebuilt around it.
-    val currentRowStates = rememberUpdatedState(rowStates)
     val density = LocalDensity.current
-    val navigator = remember(columnState, density) {
+    val host = remember(density) {
         val pointsPerPx = 1f / TvRemotePan.screenScale
         val horizontalStep =
             with(density) { (CardWidth + CardSpacing).toPx() } * pointsPerPx * HorizontalStepScale
         val verticalStep =
             with(density) { (RowHeaderHeight + CardHeight + RowSpacing).toPx() } * pointsPerPx * VerticalStepScale
-        RemoteNavigator(
-            config = SampleConfig,
-            columnState = columnState,
-            rowStates = { currentRowStates.value },
+        SwipeHost(
+            hint = hint,
+            hintTravelPx = with(density) { HintTravel.toPx() },
             stepPoints = { axis -> if (axis == PanAxis.Horizontal) horizontalStep else verticalStep },
-            dragGain = ::dragGain,
             onHint = { hintTarget = it },
             onReport = { report ->
                 gestureReport = report
@@ -175,64 +177,182 @@ fun SwipeSampleScreen(modifier: Modifier = Modifier) {
             },
         )
     }
-    DisposableEffect(navigator) {
-        TvRemotePan.onEvent = navigator::onEvent
-        onDispose { TvRemotePan.onEvent = null }
-    }
 
-    // The column is the only focusable node, so it needs platform focus before any key arrives.
-    LaunchedEffect(columnState) { runCatching { columnState.requestFocus() } }
-
-    val hintTravelPx = with(density) { HintTravel.toPx() }
-
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFF0B0B0B))) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0B0B))
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.MediaPlayPause) {
+                    layout = layout.next()
+                    gestureReport = IdleReport
+                    true
+                } else {
+                    false
+                }
+            },
+    ) {
         Column {
             BasicText(
-                text = "RokuFocus — swipe sample",
+                text = layout.title,
                 style = TextStyle(color = Color.White, fontSize = 30.sp),
                 modifier = Modifier.padding(start = 48.dp, top = 40.dp),
             )
             GestureReadout(gestureReport, frameReport)
 
-            RokuLazyColumn(
-                rows = rows,
-                state = columnState,
-                config = SampleConfig,
-                contentPadding = PaddingValues(bottom = 48.dp),
-                rowSpacing = RowSpacing,
-                focusHighlight = { isFocused ->
-                    // The border leans with the card so the two stay one object.
-                    Box(modifier = Modifier.matchParentSize().focusHint(hint, hintTravelPx)) {
-                        DefaultFocusHighlight(
-                            isFocused = isFocused,
-                            borderColor = Accent,
-                            borderWidth = 3.dp,
-                            cornerRadius = 10.dp,
-                            overflow = 5.dp,
-                            animateScale = true,
-                        )
-                    }
-                },
-                // Fires for D-pad and for any swipe the Compose tvOS fork still turned into a key;
-                // the navigator logs its own moves, so a "key" line with no "move" line before it
-                // means the fork's swipe-to-focus got through.
-                onItemSelected = { rowIndex, itemIndex ->
-                    println("[roku] key row=$rowIndex item=$itemIndex")
-                },
-                rowHeader = { rowIndex, isRowFocused ->
-                    RowHeader(sections[rowIndex].first, isRowFocused)
-                },
-            ) { rowIndex, itemIndex, isFocused ->
-                Card(
-                    label = sections[rowIndex].second[itemIndex].name,
-                    width = CardWidth,
-                    height = CardHeight,
-                    isFocused = isFocused,
-                    hint = if (isFocused) hint else null,
-                    hintTravelPx = hintTravelPx,
-                )
+            when (layout) {
+                Layout.ColumnDsl -> ColumnDslLayout(host)
+                Layout.ColumnState -> ColumnStateLayout(host)
+                Layout.StandaloneRow -> StandaloneRowLayout(host)
             }
         }
+    }
+}
+
+private const val IdleReport = "Drag the remote, or use the D-pad · Play/Pause switches layout"
+
+/** The column DSL: sizes are measured from the first card and the header, nothing declared. */
+@Composable
+private fun ColumnDslLayout(host: SwipeHost) {
+    val columnState = rememberRokuColumnState()
+    BindRemote(remember(columnState) { ColumnSwipeTarget(columnState, SampleConfig) }, host)
+    RequestFocusWhenReady(columnState) { columnState.requestFocus() }
+
+    RokuLazyColumn(
+        state = columnState,
+        config = SampleConfig,
+        contentPadding = PaddingValues(bottom = 48.dp),
+        rowSpacing = RowSpacing,
+        focusHighlight = { isFocused -> LeaningHighlight(isFocused, host) },
+        onItemSelected = ::logKeyMove,
+    ) {
+        sections.forEach { (title, items) ->
+            row(
+                itemSpacing = CardSpacing,
+                contentPadding = RailPadding,
+                key = title,
+                header = { isRowFocused -> RowHeader(title, isRowFocused) },
+            ) {
+                items(items, key = { it.id }, contentDescription = { it.name }) { item, isFocused ->
+                    Card(item.name, isFocused, host)
+                }
+            }
+        }
+    }
+}
+
+/** The state-based column: every size declared, one hoisted state per rail. */
+@Composable
+private fun ColumnStateLayout(host: SwipeHost) {
+    val columnState = rememberRokuColumnState()
+    val rowStates = sections.map { (title, items) ->
+        key(title) { rememberRokuFocusListState(itemCount = items.size) }
+    }
+    val rows = sections.mapIndexed { rowIndex, (title, items) ->
+        RokuColumnRowConfig(
+            state = rowStates[rowIndex],
+            itemWidth = CardWidth,
+            itemHeight = CardHeight,
+            itemSpacing = CardSpacing,
+            contentPadding = RailPadding,
+            headerHeight = RowHeaderHeight,
+            key = title,
+            itemContentDescription = { index -> items[index].name },
+        )
+    }
+    BindRemote(remember(columnState) { ColumnSwipeTarget(columnState, SampleConfig) }, host)
+    RequestFocusWhenReady(columnState) { columnState.requestFocus() }
+
+    RokuLazyColumn(
+        rows = rows,
+        state = columnState,
+        config = SampleConfig,
+        contentPadding = PaddingValues(bottom = 48.dp),
+        rowSpacing = RowSpacing,
+        focusHighlight = { isFocused -> LeaningHighlight(isFocused, host) },
+        onItemSelected = ::logKeyMove,
+        rowHeader = { rowIndex, isRowFocused -> RowHeader(sections[rowIndex].first, isRowFocused) },
+    ) { rowIndex, itemIndex, isFocused ->
+        Card(sections[rowIndex].second[itemIndex].name, isFocused, host)
+    }
+}
+
+/** One rail on its own: the DSL overload with a hoisted state, so a swipe has a handle on it. */
+@Composable
+private fun StandaloneRowLayout(host: SwipeHost) {
+    val (title, items) = sections.first()
+    val rowState = rememberRokuFocusListState(itemCount = items.size)
+    BindRemote(remember(rowState) { RowSwipeTarget(rowState, SampleConfig) }, host)
+    RequestFocusWhenReady(rowState) { rowState.requestFocus() }
+
+    Column {
+        RowHeader(title, rowState.hasFocus)
+        RokuLazyRow(
+            config = SampleConfig,
+            contentPadding = RailPadding,
+            itemSpacing = CardSpacing,
+            focusHighlight = { isFocused -> LeaningHighlight(isFocused, host) },
+            onItemSelected = { index -> logKeyMove(0, index) },
+            state = rowState,
+        ) {
+            items(items, key = { it.id }, contentDescription = { it.name }) { item, isFocused ->
+                Card(item.name, isFocused, host)
+            }
+        }
+    }
+}
+
+/** Routes the remote to [target] while the calling layout is on screen. */
+@Composable
+private fun BindRemote(target: SwipeTarget, host: SwipeHost) {
+    val navigator = remember(target, host) {
+        RemoteNavigator(target, host.stepPoints, ::dragGain, host.onHint, host.onReport)
+    }
+    DisposableEffect(navigator) {
+        val handler: (RemotePanEvent) -> Unit = navigator::onEvent
+        TvRemotePan.onEvent = handler
+        onDispose { if (TvRemotePan.onEvent === handler) TvRemotePan.onEvent = null }
+    }
+}
+
+/**
+ * The lists are the only focusable nodes and need platform focus before any key arrives, but a
+ * DSL row only composes its focusable once it has measured a card, so the request is retried for a
+ * few frames.
+ */
+@Composable
+private fun RequestFocusWhenReady(key: Any, request: () -> Boolean) {
+    LaunchedEffect(key) {
+        repeat(FocusRequestFrames) {
+            if (runCatching(request).getOrDefault(false)) return@LaunchedEffect
+            withFrameNanos { }
+        }
+    }
+}
+
+private const val FocusRequestFrames = 10
+
+/**
+ * Fires for D-pad presses and for any swipe the Compose tvOS fork still turned into a key; the
+ * navigator logs its own moves, so a "key" line with no "move" line before it means the fork's
+ * swipe-to-focus got through.
+ */
+private fun logKeyMove(rowIndex: Int, itemIndex: Int) {
+    println("[roku] key row=$rowIndex item=$itemIndex")
+}
+
+/** The default border, leaning with the card so the two stay one object. */
+@Composable
+private fun BoxScope.LeaningHighlight(isFocused: Boolean, host: SwipeHost) {
+    Box(modifier = Modifier.matchParentSize().focusHint(host.hint, host.hintTravelPx)) {
+        DefaultFocusHighlight(
+            isFocused = isFocused,
+            borderColor = Accent,
+            borderWidth = 3.dp,
+            cornerRadius = 10.dp,
+            overflow = 5.dp,
+            animateScale = true,
+        )
     }
 }
 
@@ -264,6 +384,7 @@ private fun GestureReadout(gesture: String, frames: String) {
     }
 }
 
+/** Exactly [RowHeaderHeight] tall: the state-based column is told that height and trusts it. */
 @Composable
 private fun RowHeader(text: String, isRowFocused: Boolean) {
     BasicText(
@@ -272,23 +393,16 @@ private fun RowHeader(text: String, isRowFocused: Boolean) {
             color = if (isRowFocused) Color.White else Color.White.copy(alpha = 0.5f),
             fontSize = 18.sp,
         ),
-        modifier = Modifier.padding(start = 48.dp, bottom = 8.dp).height(RowHeaderHeight),
+        modifier = Modifier.height(RowHeaderHeight).padding(start = 48.dp, bottom = 8.dp),
     )
 }
 
 @Composable
-private fun Card(
-    label: String,
-    width: Dp,
-    height: Dp,
-    isFocused: Boolean,
-    hint: State<Offset>?,
-    hintTravelPx: Float,
-) {
+private fun Card(label: String, isFocused: Boolean, host: SwipeHost?) {
     Box(
         modifier = Modifier
-            .size(width, height)
-            .focusHint(hint, hintTravelPx)
+            .size(CardWidth, CardHeight)
+            .focusHint(if (isFocused) host?.hint else null, host?.hintTravelPx ?: 0f)
             .clip(RoundedCornerShape(10.dp))
             .background(if (isFocused) Color(0xFF2E2E2E) else Color(0xFF1A1A1A)),
         contentAlignment = Alignment.Center,
@@ -318,8 +432,8 @@ private fun GestureReadoutPreview() {
 @Composable
 private fun CardPreview() {
     Row(modifier = Modifier.background(Color(0xFF0B0B0B)).padding(16.dp)) {
-        Card("Trending 1", CardWidth, CardHeight, isFocused = true, hint = null, hintTravelPx = 0f)
-        Card("Trending 2", CardWidth, CardHeight, isFocused = false, hint = null, hintTravelPx = 0f)
+        Card("Trending 1", isFocused = true, host = null)
+        Card("Trending 2", isFocused = false, host = null)
     }
 }
 

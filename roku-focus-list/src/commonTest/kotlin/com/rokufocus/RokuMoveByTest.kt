@@ -329,4 +329,63 @@ class RokuMoveByTest {
         moveWithinRow(s, DefaultRokuFocusConfig, forward = true)
         assertEquals(4, s.keyRepeat.consecutivePresses)
     }
+
+    // ── moveItemsBy / rokuMoveItemsBy: driving the active row through the column ──
+
+    @Test
+    fun moveItemsByDrivesTheActiveRowAsOneMove() {
+        val c = column(rowCount = 3)
+        val active = row(itemCount = 20)
+        c.activeRowState = active
+        assertTrue(c.moveItemsBy(4))
+        assertEquals(4, active.selectedIndex)
+        assertFalse(c.moveItemsBy(0))
+        assertEquals(4, active.selectedIndex)
+    }
+
+    @Test
+    fun moveItemsByWithoutAnActiveRowDoesNothing() {
+        val c = column(rowCount = 3)
+        assertFalse(c.moveItemsBy(2))
+        assertFalse(rokuMoveItemsBy(c, DefaultRokuFocusConfig, 2))
+    }
+
+    @Test
+    fun rokuMoveItemsByReportsRowAndItemExactlyOnce() {
+        val c = column(rowCount = 3).also { it.moveToRow(2) }
+        val active = row(itemCount = 20)
+        c.activeRowState = active
+        val selections = mutableListOf<Pair<Int, Int>>()
+        val consumed = rokuMoveItemsBy(c, DefaultRokuFocusConfig, 6, onSelected = { rowIndex, itemIndex ->
+            selections += rowIndex to itemIndex
+        })
+        assertTrue(consumed)
+        assertEquals(listOf(2 to 6), selections)
+    }
+
+    @Test
+    fun rokuMoveItemsByAppliesTheEdgePolicyOnceForTheActiveRow() {
+        val c = column(rowCount = 1)
+        val active = row(itemCount = 5, initialIndex = 4)
+        c.activeRowState = active
+        var boundaryHits = 0
+        val closed = RokuFocusConfig(focusEscape = RokuFocusEscape.None)
+        val open = RokuFocusConfig(focusEscape = RokuFocusEscape.All)
+
+        assertTrue(rokuMoveItemsBy(c, closed, 3, onBoundaryHit = { boundaryHits++ }))
+        assertFalse(rokuMoveItemsBy(c, open, 3, onBoundaryHit = { boundaryHits++ }))
+        assertEquals(2, boundaryHits, "one boundary report per move, not per step")
+        assertEquals(4, active.selectedIndex)
+    }
+
+    @Test
+    fun moveItemsByResetsTheColumnKeyRepeatStreak() {
+        val c = column(rowCount = 3)
+        c.activeRowState = row(itemCount = 20)
+        val now = RokuClock.uptimeMillis()
+        repeat(5) { c.keyRepeat.accept(now) }
+        assertEquals(5, c.keyRepeat.consecutivePresses)
+        assertTrue(c.moveItemsBy(1))
+        assertEquals(0, c.keyRepeat.consecutivePresses)
+    }
 }

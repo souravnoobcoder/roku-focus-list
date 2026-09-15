@@ -90,6 +90,7 @@ internal fun RokuLazyColumnImpl(
     state.syncRows(rows.size) { rows[it].isSelectable }
 
     if (rows.isEmpty()) {
+        if (state.activeRowState != null) state.activeRowState = null
         DisposableEffect(state) {
             onDispose { state.hasFocus = false }
         }
@@ -104,13 +105,16 @@ internal fun RokuLazyColumnImpl(
     val activeRow = rows[selectedRowIndex]
     val activeItemIndex = rows.selectedItemIndexIn(selectedRowIndex)
 
+    // Published whether or not the column is focused: a touchpad swipe arrives from the host
+    // layer, not through Compose focus. Guarded, so an unchanged row costs no snapshot write.
+    val activeRowState = (activeRow as? RokuResolvedRow.Items)?.config?.state
+    if (state.activeRowState !== activeRowState) state.activeRowState = activeRowState
+
     // Rows learn whether they render as focused, so consumers reading RokuFocusListState.hasFocus
     // see the same thing the header lambda does. The previously focused state is tracked so the
     // column can retract what it asserted even when that row has since left the list — a hoisted
     // state must never be left reading "focused" by a column that no longer renders it.
-    val focusedRowState = (activeRow as? RokuResolvedRow.Items)
-        ?.config?.state
-        ?.takeIf { state.hasFocus }
+    val focusedRowState = activeRowState?.takeIf { state.hasFocus }
     val focusedRowRef = remember { FocusedRowRef() }
     if (focusedRowRef.value !== focusedRowState) {
         focusedRowRef.value?.hasFocus = false
@@ -120,6 +124,7 @@ internal fun RokuLazyColumnImpl(
     DisposableEffect(state) {
         onDispose {
             state.hasFocus = false
+            state.activeRowState = null
             focusedRowRef.value?.hasFocus = false
             focusedRowRef.value = null
         }

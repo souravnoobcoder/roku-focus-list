@@ -66,6 +66,10 @@ import androidx.compose.ui.unit.takeOrElse
  * @param focusMode How the highlight relates to scrolling: parked at [focusSlot] while content
  *   scrolls ([RokuFocusMode.Static]), or walking the visible items and scrolling only at the
  *   window's edges ([RokuFocusMode.Floating]).
+ * @param state Optional hoisted state, for driving the row from outside — a touchpad swipe via
+ *   [rokuMoveBy], a deep link via [RokuFocusListState.scrollTo] — while keeping the auto-measured
+ *   item width. When given, [focusSlot], [initialIndex] and [focusMode] are ignored: the state
+ *   carries its own. Its item count is kept in step with the declared items.
  * @param content Item declarations via [RokuItemScope.items].
  */
 @Composable
@@ -82,18 +86,23 @@ fun RokuLazyRow(
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
     focusMode: RokuFocusMode = RokuFocusMode.Static,
+    state: RokuFocusListState? = null,
     content: RokuItemScope.() -> Unit
 ) {
     val scope = RokuItemScope().apply(content)
 
     // Remembered before the empty-list bail-out below: a row whose data momentarily empties must
     // come back to the item it was on, not to a freshly created state.
-    val state = rememberRokuFocusListState(
-        itemCount = scope.itemCount,
-        initialIndex = initialIndex,
-        focusSlot = focusSlot,
-        focusMode = focusMode
-    )
+    val rowState = if (state == null) {
+        rememberRokuFocusListState(
+            itemCount = scope.itemCount,
+            initialIndex = initialIndex,
+            focusSlot = focusSlot,
+            focusMode = focusMode
+        )
+    } else {
+        state.also { it.updateItemCount(scope.itemCount) }
+    }
     val density = LocalDensity.current
     val itemContent = scope.itemContent
     if (scope.itemCount == 0 || itemContent == null) return
@@ -115,7 +124,7 @@ fun RokuLazyRow(
     } else {
         val itemWidth = with(density) { measuredWidthPx.toDp() }
         RokuLazyRowImpl(
-            state = state,
+            state = rowState,
             modifier = modifier,
             config = config,
             contentPadding = contentPadding,

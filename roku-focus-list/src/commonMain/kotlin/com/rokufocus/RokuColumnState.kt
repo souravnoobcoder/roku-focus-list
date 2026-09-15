@@ -88,6 +88,16 @@ class RokuColumnState(initialRowIndex: Int = 0) {
         internal set
 
     /**
+     * State of the row the selection currently sits on, when that row is a rail of items — the
+     * handle a host uses to move *within* the active row from outside the column, whichever
+     * overload built the rows (the `row { }` DSL never hands out its rows' own states). Null for a
+     * custom row, an empty column, or before the column has composed. [RokuLazyColumn] publishes
+     * it on every pass, so it follows the selection through UP/DOWN.
+     */
+    var activeRowState: RokuFocusListState? by mutableStateOf(null)
+        internal set
+
+    /**
      * Selects [index], remembering it as the request even when the column is currently shorter or
      * that row has no items yet.
      */
@@ -117,6 +127,20 @@ class RokuColumnState(initialRowIndex: Int = 0) {
         if (steps == 0) return false
         keyRepeat.reset()
         return moveRowSteps(steps, wrapAround) != 0
+    }
+
+    /**
+     * Moves the selection [steps] items **within the active row** as one logical move — the
+     * horizontal counterpart of [moveRowsBy], for a host that only holds the column's state.
+     * Delegates to [RokuFocusListState.moveBy] on [activeRowState] and resets this column's
+     * key-repeat streak as well as the row's.
+     *
+     * @return whether the selection changed. False when there is no active item row.
+     */
+    fun moveItemsBy(steps: Int, wrapAround: Boolean = false): Boolean {
+        if (steps == 0) return false
+        keyRepeat.reset()
+        return activeRowState?.moveBy(steps, wrapAround) ?: false
     }
 
     /**

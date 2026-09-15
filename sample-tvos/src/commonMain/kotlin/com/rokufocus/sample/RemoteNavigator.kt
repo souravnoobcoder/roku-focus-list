@@ -1,23 +1,18 @@
 package com.rokufocus.sample
 
 import androidx.compose.ui.geometry.Offset
-import com.rokufocus.RokuColumnState
-import com.rokufocus.RokuFocusConfig
-import com.rokufocus.RokuFocusListState
-import com.rokufocus.rokuMoveBy
-import com.rokufocus.rokuMoveRowsBy
 import kotlin.math.abs
 
 internal enum class PanAxis { Horizontal, Vertical }
 
 /**
- * Turns a stream of [RemotePanEvent]s into selection moves the way the tvOS focus engine does, and
- * the way Apple TV+ feels as a result:
+ * Turns a stream of [RemotePanEvent]s into moves on a [SwipeTarget] the way the tvOS focus engine
+ * does, and the way Apple TV+ feels as a result:
  *
  * - **Focus follows the thumb, and only the thumb.** Every [stepPoints] of travel along the locked
  *   axis moves the selection one item. Travel that arrives faster than one item per report is
- *   applied as a single coalesced [rokuMoveBy] rather than a burst. Nothing moves after the finger
- *   lifts: there is no coast.
+ *   applied as a single coalesced move rather than a burst. Nothing moves after the finger lifts:
+ *   there is no coast.
  * - **A fast finger covers more ground.** Travel is scaled by [dragGain], which rises smoothly with
  *   the finger's speed, so a hard swipe crosses several items while a careful one walks them.
  * - **Small movement is never lost.** Travel that has not yet reached a full step is reported
@@ -29,9 +24,7 @@ internal enum class PanAxis { Horizontal, Vertical }
  * it down.
  */
 internal class RemoteNavigator(
-    private val config: RokuFocusConfig,
-    private val columnState: RokuColumnState,
-    private val rowStates: () -> List<RokuFocusListState>,
+    private val target: SwipeTarget,
     private val stepPoints: (PanAxis) -> Float,
     private val dragGain: (speed: Float) -> Float,
     private val onHint: (Offset) -> Unit,
@@ -122,15 +115,11 @@ internal class RemoteNavigator(
     }
 
     private fun move(axis: PanAxis, steps: Int): Boolean {
-        var moved = false
-        when (axis) {
-            PanAxis.Horizontal -> rowStates().getOrNull(columnState.selectedRowIndex)?.let { row ->
-                rokuMoveBy(row, config, steps, onSelected = { moved = true })
-            }
-
-            PanAxis.Vertical -> rokuMoveRowsBy(columnState, config, steps, onSelected = { moved = true })
+        val moved = when (axis) {
+            PanAxis.Horizontal -> target.moveItems(steps)
+            PanAxis.Vertical -> target.moveRows(steps)
         }
-        println("[roku] move axis=$axis steps=$steps moved=$moved row=${columnState.selectedRowIndex}")
+        println("[roku] move axis=$axis steps=$steps moved=$moved")
         return moved
     }
 
