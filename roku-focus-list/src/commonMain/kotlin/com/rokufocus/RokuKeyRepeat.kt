@@ -20,12 +20,30 @@ internal class RokuKeyRepeatTracker {
         if (now - lastKeyTime > IdleResetMs) consecutivePresses = 0
     }
 
-    /** True when [now] is too soon after the previous accepted press for another move. */
-    fun isThrottled(now: Long, config: RokuFocusConfig): Boolean {
+    /**
+     * True when [now] is too soon after the previous accepted press for another move. A
+     * [vertical] press is spaced by [RokuFocusConfig.verticalKeyRepeatDelayMs] when set; the
+     * accelerated delay is shared by both axes.
+     */
+    fun isThrottled(now: Long, config: RokuFocusConfig, vertical: Boolean = false): Boolean {
         val accelerated = config.keyRepeatAccelAfter > 0 &&
             consecutivePresses >= config.keyRepeatAccelAfter
-        val delay = if (accelerated) config.keyRepeatFastDelayMs else config.keyRepeatDelayMs
+        val delay = when {
+            accelerated -> config.keyRepeatFastDelayMs
+            vertical -> config.verticalKeyRepeatDelayMs ?: config.keyRepeatDelayMs
+            else -> config.keyRepeatDelayMs
+        }
         return now - lastKeyTime < delay
+    }
+
+    /**
+     * Forgets the acceleration streak outright, without touching [lastKeyTime] so the usual
+     * throttle still spaces out whatever comes next. Called when a non-press input — a swipe
+     * through [RokuFocusListState.moveBy] — moves the selection, so a gesture and a held D-pad
+     * can never stack into a runaway scroll.
+     */
+    fun reset() {
+        consecutivePresses = 0
     }
 
     /** Records an accepted press, extending the acceleration streak. */

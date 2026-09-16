@@ -66,6 +66,10 @@ import androidx.compose.ui.unit.takeOrElse
  * @param focusMode How the highlight relates to scrolling: parked at [focusSlot] while content
  *   scrolls ([RokuFocusMode.Static]), or walking the visible items and scrolling only at the
  *   window's edges ([RokuFocusMode.Floating]).
+ * @param state Optional hoisted state, for driving the row from outside — a touchpad swipe via
+ *   [rokuMoveBy], a deep link via [RokuFocusListState.scrollTo] — while keeping the auto-measured
+ *   item width. When given, [focusSlot], [initialIndex] and [focusMode] are ignored: the state
+ *   carries its own. Its item count is kept in step with the declared items.
  * @param content Item declarations via [RokuItemScope.items].
  */
 @Composable
@@ -82,18 +86,23 @@ fun RokuLazyRow(
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
     focusMode: RokuFocusMode = RokuFocusMode.Static,
+    state: RokuFocusListState? = null,
     content: RokuItemScope.() -> Unit
 ) {
     val scope = RokuItemScope().apply(content)
 
     // Remembered before the empty-list bail-out below: a row whose data momentarily empties must
     // come back to the item it was on, not to a freshly created state.
-    val state = rememberRokuFocusListState(
-        itemCount = scope.itemCount,
-        initialIndex = initialIndex,
-        focusSlot = focusSlot,
-        focusMode = focusMode
-    )
+    val rowState = if (state == null) {
+        rememberRokuFocusListState(
+            itemCount = scope.itemCount,
+            initialIndex = initialIndex,
+            focusSlot = focusSlot,
+            focusMode = focusMode
+        )
+    } else {
+        state.also { it.updateItemCount(scope.itemCount) }
+    }
     val density = LocalDensity.current
     val itemContent = scope.itemContent
     if (scope.itemCount == 0 || itemContent == null) return
@@ -115,7 +124,7 @@ fun RokuLazyRow(
     } else {
         val itemWidth = with(density) { measuredWidthPx.toDp() }
         RokuLazyRowImpl(
-            state = state,
+            state = rowState,
             modifier = modifier,
             config = config,
             contentPadding = contentPadding,
@@ -482,6 +491,84 @@ fun RokuLazyColumn(
         onFocusEnter = onFocusEnter,
         onFocusExit = onFocusExit,
         rowHeader = rowHeader,
+        itemContent = itemContent
+    )
+}
+
+// ─── RokuFocusGrid ──────────────────────────────────────────────────────────
+
+/**
+ * A wall of equal-size cells — an "all titles" screen, a channel guide, a settings grid —
+ * [RokuGridState.columns] wide and scrolling vertically, with one highlight overlay.
+ *
+ * Unlike the rails, a grid **floats by default**: the highlight walks the visible cells and the
+ * grid scrolls only when the selection would leave them, which is how a wall of posters is browsed
+ * everywhere. Pass `rememberRokuGridState(focusMode = RokuFocusMode.Static)` to park the selected
+ * row at the top instead and scroll on every row move.
+ *
+ * Cell width is whatever is left after [contentPadding] and the gaps, split evenly across the
+ * columns, so the content fills the viewport at any width. LEFT/RIGHT move along the row and stop
+ * at its ends (with `wrapAround` they flow into the neighbouring row); UP/DOWN move by whole rows
+ * keeping the column, and a shorter last row hands out its last cell. Touchpad input goes through
+ * [rokuMoveColumnsBy] / [rokuMoveRowsBy].
+ *
+ * ```
+ * val grid = rememberRokuGridState(itemCount = movies.size, columns = 5)
+ * RokuFocusGrid(state = grid, itemHeight = 160.dp, itemSpacing = 14.dp, rowSpacing = 14.dp) { index, isFocused ->
+ *     PosterCard(movies[index], isFocused)
+ * }
+ * ```
+ *
+ * @param state Grid state created via [rememberRokuGridState]; it owns the column count.
+ * @param itemHeight Fixed height of each cell. Width is derived from the viewport.
+ * @param modifier Modifier applied to the outer container.
+ * @param config Navigation behavior (animation, key repeat, haptics, wrap-around, focus escape).
+ * @param contentPadding Padding around the grid content.
+ * @param itemSpacing Horizontal gap between cells.
+ * @param rowSpacing Vertical gap between rows.
+ * @param focusHighlight Renders the focus border. See [RokuHighlightScope]; `rowIndex` is the
+ *   selected row and `itemIndex` the selected cell's linear index.
+ * @param onItemSelected Called when the selected cell changes, with its linear index.
+ * @param onItemClicked Called on Enter/DpadCenter press.
+ * @param onFocusEnter Called when the grid gains focus.
+ * @param onFocusExit Called when the grid loses focus.
+ * @param itemKey Stable key per cell, following `LazyVerticalGrid`'s `key` contract.
+ * @param itemContentDescription Describes a cell to accessibility services.
+ * @param itemContent Composable for each cell. Receives the linear `index` and `isFocused`.
+ */
+@Composable
+fun RokuFocusGrid(
+    state: RokuGridState,
+    itemHeight: Dp,
+    modifier: Modifier = Modifier,
+    config: RokuFocusConfig = DefaultRokuFocusConfig,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    itemSpacing: Dp = 12.dp,
+    rowSpacing: Dp = 12.dp,
+    focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
+    onItemSelected: ((index: Int) -> Unit)? = null,
+    onItemClicked: ((index: Int) -> Unit)? = null,
+    onFocusEnter: (() -> Unit)? = null,
+    onFocusExit: (() -> Unit)? = null,
+    itemKey: ((index: Int) -> Any)? = null,
+    itemContentDescription: ((index: Int) -> String?)? = null,
+    itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
+) {
+    RokuFocusGridImpl(
+        state = state,
+        itemHeight = itemHeight,
+        modifier = modifier,
+        config = config,
+        contentPadding = contentPadding,
+        itemSpacing = itemSpacing,
+        rowSpacing = rowSpacing,
+        focusHighlight = focusHighlight,
+        onItemSelected = onItemSelected,
+        onItemClicked = onItemClicked,
+        onFocusEnter = onFocusEnter,
+        onFocusExit = onFocusExit,
+        itemKey = itemKey,
+        itemContentDescription = itemContentDescription,
         itemContent = itemContent
     )
 }

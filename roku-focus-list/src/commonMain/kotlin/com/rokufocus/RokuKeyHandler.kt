@@ -7,6 +7,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import kotlin.math.abs
 
 /**
  * Low-level D-pad handler, for wiring a fixed-focus container of your own.
@@ -81,6 +82,155 @@ fun Modifier.rokuKeyHandler(
 }
 
 /**
+ * Applies one multi-step move to a row, as a single coalesced move, and reports whether the
+ * gesture was consumed.
+ *
+ * This is the gesture counterpart to [Modifier.rokuKeyHandler], and the reason it exists rather
+ * than leaving consumers to call [RokuFocusListState.moveBy] themselves is the edge policy: a
+ * multi-step move that runs out of row has to consume what it can and then apply
+ * [RokuFocusConfig.focusEscape] **once**, never once per step. [RokuTouchpad] drives the built-in
+ * components through this family; a host with its own input source (a trackpad, a wheel, a
+ * gamepad stick) calls it directly with a negative count for a backward move.
+ *
+ * @param steps How far to move; negative travels toward the start. 0 does nothing.
+ * @param orientation Which pair of [RokuFocusEscape] edges a clipped move is judged against.
+ * @param onSelected Called at most once, with the new index, when the selection changed.
+ * @param onBoundaryHit Called when the swipe could not move at all.
+ * @return whether the gesture was consumed. False means the move ran into an edge that
+ *   [RokuFocusConfig.focusEscape] leaves open, so the host should let focus travel onward.
+ */
+fun rokuMoveBy(
+    state: RokuFocusListState,
+    config: RokuFocusConfig,
+    steps: Int,
+    orientation: Orientation = Orientation.Horizontal,
+    onSelected: ((index: Int) -> Unit)? = null,
+    onBoundaryHit: (() -> Unit)? = null
+): Boolean {
+    if (steps == 0) return false
+    state.keyRepeat.reset()
+
+    val consumed = state.moveSteps(steps, config.wrapAround)
+    if (consumed != 0) onSelected?.invoke(state.selectedIndex)
+    if (consumed == abs(steps)) return true
+
+    // Clipped — the row ran out. Everything below happens exactly once, however many steps were
+    // asked for.
+    if (consumed == 0) onBoundaryHit?.invoke()
+    return !config.focusEscape.allowsLeaving(orientation, forward = steps > 0)
+}
+
+/**
+ * Applies one velocity-scaled swipe to a column, as a single coalesced move, and reports whether
+ * the gesture was consumed. The vertical sibling of [rokuMoveBy]; rows with nothing to select are
+ * stepped over and do not count toward [steps].
+ *
+ * @return whether the gesture was consumed. False means the move ran into the top or bottom edge
+ *   and [RokuFocusConfig.focusEscape] leaves it open.
+ */
+fun rokuMoveRowsBy(
+    state: RokuColumnState,
+    config: RokuFocusConfig,
+    steps: Int,
+    onSelected: ((rowIndex: Int) -> Unit)? = null,
+    onBoundaryHit: (() -> Unit)? = null
+): Boolean {
+    if (steps == 0) return false
+    state.keyRepeat.reset()
+
+    val consumed = state.moveRowSteps(steps, config.wrapAround)
+    if (consumed != 0) onSelected?.invoke(state.selectedRowIndex)
+    if (consumed == abs(steps)) return true
+
+    if (consumed == 0) onBoundaryHit?.invoke()
+    return !config.focusEscape.allowsLeaving(Orientation.Vertical, forward = steps > 0)
+}
+
+/**
+ * Applies one velocity-scaled swipe **within the active row of a column**, as a single coalesced
+ * move, for hosts that only hold the column's state — the `row { }` DSL never hands out its rows'
+ * states. Resolves [RokuColumnState.activeRowState] and behaves exactly like [rokuMoveBy] on it,
+ * escape policy included, so a consumer can wire horizontal swipes the same way for either
+ * [RokuLazyColumn] overload.
+ *
+ * @param onSelected Called at most once, with the row and the new item index, when the selection
+ *   changed.
+ * @return whether the gesture was consumed. False when the column has no active item row, or when
+ *   the move ran into a start/end edge that [RokuFocusConfig.focusEscape] leaves open.
+ */
+fun rokuMoveItemsBy(
+    state: RokuColumnState,
+    config: RokuFocusConfig,
+    steps: Int,
+    onSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
+    onBoundaryHit: (() -> Unit)? = null
+): Boolean {
+    if (steps == 0) return false
+    val row = state.activeRowState ?: return false
+    state.keyRepeat.reset()
+    val rowIndex = state.selectedRowIndex
+    return rokuMoveBy(
+        state = row,
+        config = config,
+        steps = steps,
+        orientation = Orientation.Horizontal,
+        onSelected = onSelected?.let { report -> { itemIndex -> report(rowIndex, itemIndex) } },
+        onBoundaryHit = onBoundaryHit
+    )
+}
+
+/**
+ * Applies one velocity-scaled swipe **along the row of a grid**, as a single coalesced move — the
+ * [RokuFocusGrid] counterpart of [rokuMoveBy]. Clamps at the row's ends, or with
+ * [RokuFocusConfig.wrapAround] flows into the neighbouring rows in reading order.
+ *
+ * @return whether the gesture was consumed. False means the move ran into a start/end edge that
+ *   [RokuFocusConfig.focusEscape] leaves open.
+ */
+fun rokuMoveColumnsBy(
+    state: RokuGridState,
+    config: RokuFocusConfig,
+    steps: Int,
+    onSelected: ((index: Int) -> Unit)? = null,
+    onBoundaryHit: (() -> Unit)? = null
+): Boolean {
+    if (steps == 0) return false
+    state.keyRepeat.reset()
+
+    val consumed = state.moveColumnSteps(steps, config.wrapAround)
+    if (consumed != 0) onSelected?.invoke(state.selectedIndex)
+    if (consumed == abs(steps)) return true
+
+    if (consumed == 0) onBoundaryHit?.invoke()
+    return !config.focusEscape.allowsLeaving(Orientation.Horizontal, forward = steps > 0)
+}
+
+/**
+ * Applies one velocity-scaled swipe **up or down a grid**, as a single coalesced move that keeps
+ * the column — the [RokuFocusGrid] counterpart of the column's [rokuMoveRowsBy].
+ *
+ * @return whether the gesture was consumed. False means the move ran into the top or bottom edge
+ *   and [RokuFocusConfig.focusEscape] leaves it open.
+ */
+fun rokuMoveRowsBy(
+    state: RokuGridState,
+    config: RokuFocusConfig,
+    steps: Int,
+    onSelected: ((index: Int) -> Unit)? = null,
+    onBoundaryHit: (() -> Unit)? = null
+): Boolean {
+    if (steps == 0) return false
+    state.keyRepeat.reset()
+
+    val consumed = state.moveRowSteps(steps, config.wrapAround)
+    if (consumed != 0) onSelected?.invoke(state.selectedIndex)
+    if (consumed == abs(steps)) return true
+
+    if (consumed == 0) onBoundaryHit?.invoke()
+    return !config.focusEscape.allowsLeaving(Orientation.Vertical, forward = steps > 0)
+}
+
+/**
  * Applies one horizontal step to [state], honouring [RokuFocusConfig.wrapAround].
  *
  * @return whether the selection actually changed.
@@ -90,17 +240,10 @@ internal fun moveWithinRow(
     config: RokuFocusConfig,
     forward: Boolean
 ): Boolean {
-    if (config.wrapAround && state.itemCount > 1) {
-        if (forward && !state.canScrollForward) {
-            state.scrollTo(0)
-            return true
-        }
-        if (!forward && !state.canScrollBackward) {
-            state.scrollTo(state.itemCount - 1)
-            return true
-        }
-    }
-    return if (forward) state.moveNext() else state.movePrevious()
+    // Deliberately routed through the shared core rather than moveBy, which resets the key-repeat
+    // streak: this IS the key-repeat path, and resetting here would stop acceleration ever
+    // engaging.
+    return state.moveSteps(if (forward) 1 else -1, config.wrapAround) != 0
 }
 
 /** Which edge a press ran into, and whether focus is allowed to leave through it. */

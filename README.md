@@ -86,6 +86,14 @@ Leave `composeTvos { strictMode }` off. It reports false positives on iOS-only p
 (`*-uikitarm64`, `*-uikitsimarm64`) and on conflict-resolution losers, failing builds whose linked
 graph is fine.
 
+The Siri Remote touchpad is read by the library: provide a `RokuTouchpad` and call
+`attachSiriRemote(view)` on the Compose host view (see [Touchpad remotes](#touchpad-remotes)), and
+every component follows the thumb like the native focus engine. Two more things the fork decides
+for you, both covered further down: it turns every touchpad swipe into a single D-pad key at
+lift-off, which `attachSiriRemote` suppresses, and on a real Apple TV HD it lays the scene out at
+density 1.0 (see [Check `LocalDensity`](#check-localdensity-on-real-tv-hardware)). `sample-tvos/`
+is a runnable Apple TV app that shows both.
+
 ### Samsung TV (Tizen)
 
 A Tizen TV app is a web app — HTML, JS and WebAssembly wrapped in a `config.xml` widget manifest —
@@ -122,7 +130,7 @@ Published to Maven Central, so `mavenCentral()` in your repositories is all the 
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("io.github.souravnoobcoder:roku-focus-list:2.2.0")
+            implementation("io.github.souravnoobcoder:roku-focus-list:2.3.0")
         }
     }
 }
@@ -135,7 +143,7 @@ for `commonMain`, the AAR for Android, a jar for desktop, klibs for iOS.
 
 ```kotlin
 dependencies {
-    implementation("io.github.souravnoobcoder:roku-focus-list:2.2.0")
+    implementation("io.github.souravnoobcoder:roku-focus-list:2.3.0")
 }
 ```
 
@@ -500,6 +508,71 @@ window has no fixed slot — so it is ignored in `Floating`.
 
 ---
 
+## Entering a row: spatial or remembered
+
+When a vertical move enters a row, which card does the highlight land on? Two answers exist on TV:
+
+- **Spatial** (the default, and what the tvOS focus engine does): the card physically under the
+  highlight — the one whose frame contains the highlight's centre, or the nearest one if none does.
+  Go down and back up, and you are on the card you were above, not the card that row last had.
+- **Remembered** (Roku, Android TV Leanback, and this library before 2.3.0): the card the row
+  selected last, wherever it sits on screen.
+
+```kotlin
+RokuFocusConfig(rowEntry = RokuRowEntry.Remembered)   // the 2.x behaviour
+```
+
+Only **floating** rows can tell the two apart. A Static row scrolls its remembered card under the
+fixed slot, so the card above the highlight is the remembered one either way, and Static rows are
+left alone. In a floating row the highlight walks and rows scroll independently, and there the
+difference is the one you feel on every second D-pad press.
+
+The entered row is **never scrolled sideways** to line anything up: the chosen card is always one
+already on screen inside the row's current window, so the highlight simply lands on it. Leaving or
+entering a `customRow` keeps the row's own selection. `RokuFocusGrid` needs nothing here — its
+cells are aligned, and moving between rows already keeps the column.
+
+---
+
+## Grid (`RokuFocusGrid`)
+
+A wall of equal-size cells — an "all titles" screen, a channel guide, a settings grid — N columns
+wide and scrolling vertically, with one highlight overlay:
+
+```kotlin
+val grid = rememberRokuGridState(itemCount = movies.size, columns = 5)
+
+RokuFocusGrid(
+    state = grid,
+    itemHeight = 160.dp,
+    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 24.dp),
+    itemSpacing = 14.dp,
+    rowSpacing = 14.dp,
+    onItemClicked = { index -> open(movies[index]) },
+) { index, isFocused ->
+    PosterCard(movies[index], isFocused)
+}
+```
+
+Cell width is whatever is left after the padding and the gaps, split evenly across the columns, so
+the grid fills the viewport at any width. LEFT/RIGHT move along the row and stop at its ends (with
+`wrapAround` they flow into the neighbouring row like reading); UP/DOWN move by whole rows keeping
+the column, and a shorter last row hands out its last cell.
+
+Unlike the rails, **a grid floats by default**: the highlight walks the visible cells and the grid
+scrolls only when the selection would leave them, which is how a wall of posters is browsed
+everywhere. `rememberRokuGridState(focusMode = RokuFocusMode.Static)` parks the selected row at the
+top instead and scrolls on every row move. The state follows the same rules as the rails: the
+selection is a raw requested index coerced on read, and the floating window is a raw anchor row
+contained at write time — so a grid that is still loading, or one that shrank, comes back where it
+was. `Saver` and `rememberRokuGridState` handle restoration.
+
+Touchpad input goes through `rokuMoveColumnsBy(gridState, …)` and `rokuMoveRowsBy(gridState, …)`,
+or `gridState.moveColumnsBy` / `moveRowsBy` / `moveBy` (reading order) directly — see
+[Touchpad remotes](#touchpad-remotes).
+
+---
+
 ## Focus Slot
 
 In `Static` mode, control where the highlight sits within the visible window:
@@ -618,13 +691,29 @@ RokuLazyRow(config = config) { /* items */ }
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `highlightAnimationSpec` | `AnimationSpec<Float>` | `tween(200ms)` | Highlight and scroll animation |
+| `highlightAnimationSpec` | `AnimationSpec<Float>` | `tween(200ms)` | Highlight position animation. Content scrolling uses its own velocity-carrying spring. |
 | `keyRepeatDelayMs` | `Long` | `150` | Throttle delay for held D-pad keys (ms) |
 | `keyRepeatAccelAfter` | `Int` | `3` | After N presses, switch to fast delay. 0 = disabled |
 | `keyRepeatFastDelayMs` | `Long` | `50` | Fast repeat delay after acceleration |
 | `wrapAround` | `Boolean` | `false` | Wrap from last item to first and vice versa |
 | `hapticFeedback` | `Boolean` | `true` | Vibrate on boundary hit. No-op on desktop and web. |
 | `focusEscape` | `RokuFocusEscape` | `All` | Per-edge control over letting focus leave the list |
+| `verticalAnimationSpec` | `AnimationSpec<Float>?` | `null` | Speed of a vertical move in a column or grid: drives the highlight's Y **and** the content scroll between rows together. Null keeps `highlightAnimationSpec` for the highlight and the default spring for the scroll. |
+| `verticalKeyRepeatDelayMs` | `Long?` | `null` | Throttle for held UP/DOWN before acceleration. Null uses `keyRepeatDelayMs`. Slows a held D-pad down the column without slowing it along a row. |
+| `rowEntry` | `RokuRowEntry` | `Spatial` | Which card a vertical move lands on when entering a floating row: the one under the highlight, or the row's remembered one. See [Entering a row](#entering-a-row-spatial-or-remembered). |
+
+Touchpad pacing and the focus-movement hint are configured on `RokuTouchpadConfig`, not here — see
+[Touchpad remotes](#touchpad-remotes).
+
+Vertical moves can be paced separately from horizontal ones — the highlight and the content travel
+between rows on the same curve, so raising or lowering one never detaches the other:
+
+```kotlin
+RokuFocusConfig(
+    verticalAnimationSpec = tween(350, easing = FastOutSlowInEasing),  // slower row-to-row travel
+    verticalKeyRepeatDelayMs = 220L,                                    // a held DOWN steps rows less often
+)
+```
 
 Built-in animation presets:
 
@@ -633,6 +722,110 @@ RokuAnimationSpec.Default  // tween(300ms) — balanced
 RokuAnimationSpec.Fast     // tween(150ms) — snappy
 RokuAnimationSpec.Smooth   // spring(0.8, 300) — organic
 ```
+
+---
+
+## Touchpad remotes
+
+A Siri Remote produces a thumb that moves, not discrete presses. The library reads it for you:
+provide one `RokuTouchpad` at the root and every `RokuLazyRow`, `RokuLazyColumn` and
+`RokuFocusGrid` below follows the thumb the way the native tvOS focus engine does. On tvOS the whole
+wiring is:
+
+```kotlin
+val touchpad = RokuTouchpad()
+ComposeUIViewController {
+    CompositionLocalProvider(LocalRokuTouchpad provides touchpad) { App() }
+}.also { touchpad.attachSiriRemote(it.view) }
+```
+
+What every component then does, with no per-screen code:
+
+- **Focus follows the thumb, and only the thumb.** Each 0.65 of an item pitch of travel moves one
+  item (one row pitch up or down), coalesced into a single move when travel arrives faster than one
+  item per report. Nothing moves once the thumb lifts — there is no coast.
+- **A fast thumb covers more ground** through a smooth velocity gain (×1 up to 2,500 pt/s, ×2 from
+  12,000), so a hard swipe crosses about twice the items of a careful one.
+- **Small movement is never lost.** Travel short of a full step plays a soft light across the
+  focused card toward the thumb, brightening with pull, while the card gives a small wiggle (4 dp, a 2°
+  tilt, a 1 % lift; the highlight travels slightly further for depth) and springs back with a
+  bounce when the thumb lifts. This is the focus-movement hint that tells the user a small swipe
+  was felt. The light is blended onto the card's own pixels, so rounded or odd-shaped cards keep
+  their corners. At the end of a row the lean pins at full pull, pushing further is dropped, and
+  one step of travel back moves back.
+- **Swipes and keys are the same move.** `onItemSelected`, `wrapAround` and `focusEscape` behave
+  identically for both, and a `customRow` receives each step as a `RokuNavKey.Left` / `Right`.
+
+Tune it with `RokuTouchpadConfig`. Distances and speeds are in the units your host reports — UIKit
+points on tvOS, where a full swipe across the pad is 1,000–1,800 pt and a relaxed flick lifts off at
+4,000–8,000 pt/s:
+
+| Parameter | Default | Description |
+|---|---|---|
+| `itemStepFraction` | `0.65` | Travel per item along a row, in item pitches |
+| `rowStepFraction` | `1` | Travel per row up or down, in row pitches |
+| `axisLock` | `16` | Travel before a contact commits to an axis and can move; below it the card only leans |
+| `gainStartVelocity` / `gainMaxVelocity` | `2500` / `12000` | Thumb speeds between which travel counts ×1 → `maxGain`, smoothly |
+| `maxGain` | `2` | Travel multiplier for a fast thumb |
+| `hintTravel` | `4.dp` | Lean of the focused card at a full step of pending travel (square-root curve) |
+| `hintTiltDegrees` | `2` | Tilt toward the thumb at a full step |
+| `hintScale` | `1.012` | Lift of the card at a full step; `1` disables it |
+| `hintHighlightParallax` | `1.2` | How much further than the card the highlight leans; `1` moves them as one |
+| `hintLight` | `0.10` | Peak opacity of the light that slides toward the thumb across the card; `0` disables it |
+| `hintLightColor` | `Color.White` | Colour of that light |
+| `hintReleaseSpec` | `spring(0.55, 450)` | How the lean springs back when the thumb lifts |
+
+Other platforms feed the same object: call `panBegan()`, `panChanged(dx, dy, velocityX, velocityY)`
+and `panEnded()` from whatever reads the device, and set `pxPerUnit` if you report anything other
+than pixels. Without a `RokuTouchpad` in the composition none of this exists at runtime — no layer,
+no coroutine, no key interception — so a D-pad TV runs exactly the code it ran before.
+
+### The moves underneath
+
+The touchpad drives the components through coalesced multi-step moves you can also call yourself,
+for input that arrives some other way (a trackpad, a wheel, a gamepad stick). Calling `moveNext()`
+N times for one gesture gives you N selection changes, N highlight animations, N scroll animations
+and N `onItemSelected` callbacks — and every prefetch or saved-position write hanging off that
+callback fires N times too. These do it once:
+
+```kotlin
+rowState.moveBy(3)           // one selection change, one animation, one callback
+rowState.moveBy(-2)          // negative steps travel toward the start
+columnState.moveRowsBy(2)    // vertical equivalent; skips rows with nothing to select
+columnState.moveItemsBy(3)   // within the column's active row — no row state needed
+gridState.moveColumnsBy(2)   // along a grid row; moveRowsBy keeps the column
+
+// Edge-aware variants that also apply focusEscape / onBoundaryHit exactly once per move:
+rokuMoveBy(rowState, config, steps = 3, onSelected = { index -> /* ... */ })
+rokuMoveRowsBy(columnState, config, steps = -1)
+rokuMoveItemsBy(columnState, config, steps = 3, onSelected = { rowIndex, itemIndex -> /* ... */ })
+rokuMoveColumnsBy(gridState, config, steps = 2)
+```
+
+Every entry point has a handle for this. A `RokuLazyColumn` exposes the selected rail's state as
+`columnState.activeRowState`, so horizontal moves go through the column state and the `row { }`
+DSL — which never hands out its rows' states — works exactly like the state-based overload. A
+standalone DSL `RokuLazyRow` takes an optional hoisted `state` for the same reason, while keeping
+its auto-measured item width.
+
+Moves clamp at the ends of a row — asking for more steps than remain lands on the last item. With
+`wrapAround` the move wraps only when the selection is *already* parked on the edge being pushed,
+mirroring single steps. `moveBy(1)` and `moveNext()` behave identically; `moveNext` is implemented
+on top of the same core, not duplicated. A multi-step move also resets the key-repeat acceleration
+streak, so a swipe landing mid-repeat cannot compound into a runaway scroll. Chained moves scroll
+as one continuous motion: the scroll animation carries its velocity across retargets instead of
+restarting from rest on each item.
+
+### Apple TV and the Compose tvOS fork
+
+The fork already turns every touchpad swipe into one D-pad key at lift-off — a slow drag is one
+step, a long flick is one step, and there is no velocity to read. `attachSiriRemote` installs a
+`UIPanGestureRecognizer` that cancels the underlying touch once it recognises, so the fork's key is
+never dispatched and the swipe is not applied twice; clicks and D-pad ring presses are `UIPress`
+events and are unaffected. A flick so short that the pan only recognises as the touch ends can
+still leak that one key (seen twice in ~130 gestures on real hardware), so the components drop any
+direction key arriving within 120 ms of touch-driven movement. If you install a pan recogniser of
+your own instead, leave `cancelsTouchesInView = true`.
 
 ---
 
@@ -699,20 +892,27 @@ library's users.
 |---|---|
 | `RokuLazyRow` | Horizontal fixed-focus row. DSL variant auto-measures width; state variant takes explicit `itemWidth`. |
 | `RokuLazyColumn` | Vertical + horizontal OTT grid. DSL variant manages per-row state internally; state variant takes `List<RokuColumnRowConfig>`. |
+| `RokuFocusGrid` | N-column wall of equal cells, scrolling vertically. Floats by default. Takes a `RokuGridState`. |
 | `RokuLazyColumnScope.row` | A rail of equal-size cards. Sizes explicit, or measured from the first item when omitted. |
 | `RokuLazyColumnScope.customRow` | Anything else, with LEFT/RIGHT/ENTER delegated to it. |
 | `DefaultFocusHighlight` | Default white rounded-border highlight. `BoxScope` extension, fully replaceable. |
 | `Modifier.rokuKeyHandler` | Low-level D-pad handler, for wiring your own container. |
+| `rokuMoveBy` / `rokuMoveRowsBy` / `rokuMoveItemsBy` / `rokuMoveColumnsBy` | Edge-aware multi-step moves: a row, a column's rows, a column's active row, a grid's row and rows. Escape policy applied once per move. |
+| `RokuTouchpad.attachSiriRemote` | tvOS only. Installs the pan recogniser that feeds a `RokuTouchpad` from the Siri Remote; returns an attachment with `detach()`. |
 
 ### Types
 
 | Type | Description |
 |---|---|
-| `RokuColumnState` | Which row is selected; focus control; observable `hasFocus`. |
-| `RokuFocusListState` | Which item of a row is selected. |
+| `RokuColumnState` | Which row is selected; focus control; observable `hasFocus`; `activeRowState` and `moveItemsBy` / `moveRowsBy` for driving it from outside. |
+| `RokuFocusListState` | Which item of a row is selected; `moveBy` for coalesced multi-step moves. |
+| `RokuGridState` | Which cell of a grid is selected (linear index; `selectedRow` / `selectedColumn` derived); `moveColumnsBy` / `moveRowsBy` / `moveBy`; owns `columns` and the focus mode. |
 | `RokuFocusConfig` | Navigation behaviour. |
+| `RokuTouchpad` | A touchpad remote: `panBegan` / `panChanged` / `panEnded` in, thumb-following moves and the focus-movement hint out. Provided through `LocalRokuTouchpad`. |
+| `RokuTouchpadConfig` | Pacing (step fractions, axis lock, velocity gain) and hint tuning (light, travel, tilt, lift, parallax, release spring). |
 | `RokuFocusMode` | Per-axis `Static` (fixed slot, content scrolls) vs `Floating` (highlight walks, scrolls at window edges). |
 | `RokuFocusEscape` | Per-edge focus escape. |
+| `RokuRowEntry` | `Spatial` (the card under the highlight, default) vs `Remembered` (the row's last card) when a vertical move enters a floating row. |
 | `RokuHighlightScope` | Receiver of `focusHighlight`: `BoxScope` + `rowIndex`, `itemIndex`. |
 | `RokuNavKey` | `Left` / `Right` / `Enter`, handed to `customRow`'s `onKeyEvent`. |
 | `RokuColumnRowConfig` | One row of the state-based `RokuLazyColumn`. |
@@ -721,10 +921,10 @@ library's users.
 
 | Callback | Available on | Description |
 |---|---|---|
-| `onItemSelected` | Row, Column | Fires when the selected index changes. |
-| `onItemClicked` | Row, Column | Fires on Enter / DpadCenter press. |
-| `onFocusEnter` | Row, Column | Fires when the list gains focus. |
-| `onFocusExit` | Row, Column | Fires when the list loses focus. |
+| `onItemSelected` | Row, Column, Grid | Fires when the selected index changes — once per move, whether a key or a swipe caused it. |
+| `onItemClicked` | Row, Column, Grid | Fires on Enter / DpadCenter press. |
+| `onFocusEnter` | Row, Column, Grid | Fires when the list gains focus. |
+| `onFocusExit` | Row, Column, Grid | Fires when the list loses focus. |
 
 ---
 
@@ -753,7 +953,7 @@ keep their 1.x signatures.
 1. `RokuLazyRow` / `RokuLazyColumn` is a **single focusable composable** — individual items are never focused
 2. D-pad events are intercepted at the container level with key-repeat throttling
 3. Selection is tracked via `selectedIndex` in `RokuFocusListState`, not the Compose focus system
-4. Content scrolls via `LazyRow(userScrollEnabled = false)` + `animateScrollToItem()` — Compose handles recycling
+4. Content scrolls via `LazyRow(userScrollEnabled = false)` driven by one spring per list whose velocity is carried across retargets, so a run of quick moves (key repeat, a touchpad drag or fling) reads as one continuous scroll rather than a restart per item; far jumps use `animateScrollToItem()` for its teleporting. Compose handles recycling
 5. The highlight overlay is positioned with `graphicsLayer { translationX/Y }` (GPU-only, no re-layout)
 6. At list edges, overflow correction shifts the highlight to match the actual item position
 7. In `RokuLazyColumn`, one global highlight animates X, Y, width, and height between rows of different card sizes
@@ -805,8 +1005,9 @@ which is why no platform-specific source set is needed.
 
 | Module | What it is |
 |---|---|
-| `roku-focus-list/` | The library. All code in `src/commonMain/kotlin`, tests in `src/commonTest/kotlin`. |
-| `app/` | Android TV demo app: 100 rows, 6 card types, 7 demo screens. Run on a TV emulator or device. |
+| `roku-focus-list/` | The library. All code in `src/commonMain/kotlin` except the Siri Remote recogniser in `src/tvosMain/kotlin`; tests in `src/commonTest/kotlin`. |
+| `app/` | Android TV demo app: 100 rows, 6 card types, 9 demo screens, browsing the Apple TV way (floating focus, spatial row entry) with a Static screen for comparison. Run on a TV emulator or device. |
+| `sample-tvos/` | Runnable Apple TV sample: the Android demo's mixed-size home screen plus the four layouts, each in both focus modes, driven by `RokuTouchpad` with the one-line tvOS wiring, plus an on-screen selection and frame-timing readout. Xcode project in `sample-tvos/tvosApp/`; build in Release for a fair read on smoothness. |
 | `consumer-kmp/` | Verification module — a KMP library whose `commonMain` uses `RokuLazyRow` / `RokuLazyColumn`. |
 | `verification/published-consumer/` | Standalone Gradle build that resolves the **published** artifact from `mavenLocal` in `commonMain`. |
 

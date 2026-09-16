@@ -66,4 +66,37 @@ class RokuKeyRepeatTrackerTest {
         assertEquals(0, tracker.consecutivePresses)
         assertTrue(tracker.isThrottled(tracker.lastKeyTime + 100L, config))
     }
+
+    @Test
+    fun aVerticalPressCanBeSpacedMoreWidelyThanAHorizontalOne() {
+        val config = RokuFocusConfig(keyRepeatDelayMs = 100L, verticalKeyRepeatDelayMs = 400L, keyRepeatAccelAfter = 0)
+        val tracker = RokuKeyRepeatTracker()
+        tracker.accept(1_000L)
+
+        assertFalse(tracker.isThrottled(1_150L, config), "a row move 150 ms later is accepted")
+        assertTrue(tracker.isThrottled(1_150L, config, vertical = true), "a row-to-row move at 150 ms is not")
+        assertFalse(tracker.isThrottled(1_400L, config, vertical = true))
+    }
+
+    @Test
+    fun withoutAVerticalDelayBothAxesShareTheOne() {
+        val config = RokuFocusConfig(keyRepeatDelayMs = 100L, keyRepeatAccelAfter = 0)
+        val tracker = RokuKeyRepeatTracker()
+        tracker.accept(1_000L)
+
+        assertEquals(tracker.isThrottled(1_050L, config), tracker.isThrottled(1_050L, config, vertical = true))
+        assertEquals(tracker.isThrottled(1_150L, config), tracker.isThrottled(1_150L, config, vertical = true))
+    }
+
+    @Test
+    fun theAcceleratedDelayIsSharedByBothAxes() {
+        val config = RokuFocusConfig(
+            keyRepeatDelayMs = 100L, verticalKeyRepeatDelayMs = 400L, keyRepeatAccelAfter = 2, keyRepeatFastDelayMs = 30L
+        )
+        val tracker = RokuKeyRepeatTracker()
+        tracker.accept(1_000L)
+        tracker.accept(1_100L)
+
+        assertFalse(tracker.isThrottled(1_140L, config, vertical = true), "once accelerated, 40 ms is enough down the column too")
+    }
 }

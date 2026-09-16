@@ -11,6 +11,7 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
+import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -110,16 +111,66 @@ class RokuFocusListState(
     val canScrollBackward: Boolean
         get() = selectedIndex > 0
 
-    fun moveNext(): Boolean {
-        if (!canScrollForward) return false
-        scrollTo(selectedIndex + 1)
-        return true
+    /** Steps one item toward the end. Same selection behaviour as `moveBy(1)`. */
+    fun moveNext(): Boolean = moveSteps(1, wrapAround = false) != 0
+
+    /** Steps one item toward the start. Same selection behaviour as `moveBy(-1)`. */
+    fun movePrevious(): Boolean = moveSteps(-1, wrapAround = false) != 0
+
+    /**
+     * Moves the selection [steps] items as **one logical move** — negative steps travel toward the
+     * start. However many items it covers, it writes the selection once, so consumers see one
+     * selection change, one `onItemSelected`, and one highlight and scroll animation rather than a
+     * stutter of N. That coalescing is the whole point: it cannot be reproduced from outside by
+     * calling [moveNext] in a loop.
+     *
+     * Built for velocity-scaled input — a touchpad remote's swipe, via
+     * [RokuFocusConfig.stepsForVelocity] — but it is input-agnostic and takes a plain step count.
+     *
+     * The move clamps at the ends of the row: asking for more steps than remain lands on the last
+     * item rather than leaving a pending request past the end. [wrapAround] mirrors single-step
+     * navigation exactly, wrapping only when the selection is **already** parked on the edge being
+     * pushed against, so a flick from the middle stops at the end and only the next one wraps —
+     * pass [RokuFocusConfig.wrapAround] here.
+     *
+     * Calling this resets the key-repeat acceleration streak, so a swipe arriving mid-D-pad-repeat
+     * cannot compound with repeat acceleration into a runaway scroll. [moveNext] / [movePrevious]
+     * deliberately do not, because they *are* the D-pad path and resetting there would stop
+     * acceleration from ever engaging.
+     *
+     * @return whether the selection actually changed. `moveBy(0)` is a no-op returning false.
+     */
+    fun moveBy(steps: Int, wrapAround: Boolean = false): Boolean {
+        if (steps == 0) return false
+        keyRepeat.reset()
+        return moveSteps(steps, wrapAround) != 0
     }
 
-    fun movePrevious(): Boolean {
-        if (!canScrollBackward) return false
-        scrollTo(selectedIndex - 1)
-        return true
+    /**
+     * Shared core of [moveBy] and the single-step moves, returning how many items the selection
+     * actually covered so a caller can tell a fully-consumed move from a clipped one. Deliberately
+     * free of key-repeat side effects: the D-pad path runs through here too.
+     */
+    internal fun moveSteps(steps: Int, wrapAround: Boolean): Int {
+        if (steps == 0 || _itemCount == 0) return 0
+        val current = selectedIndex
+        val last = _itemCount - 1
+
+        if (wrapAround && _itemCount > 1) {
+            if (steps > 0 && current == last) {
+                scrollTo(0)
+                return abs(steps)
+            }
+            if (steps < 0 && current == 0) {
+                scrollTo(last)
+                return abs(steps)
+            }
+        }
+
+        val target = (current + steps).coerceIn(0, last)
+        if (target == current) return 0
+        scrollTo(target)
+        return abs(target - current)
     }
 
     /** Selects [index], remembering it as the request even when the row is currently shorter. */
@@ -268,6 +319,23 @@ internal fun computeHighlightOffsetPx(
     viewportWidthPx: Float
 ): Float {
     if (state.itemCount == 0) return startPaddingPx
+    return windowLeftEdgePx(state, itemWidthPx, itemSpacingPx, startPaddingPx, endPaddingPx, viewportWidthPx) +
+        state.highlightSlot * (itemWidthPx + itemSpacingPx)
+}
+
+/**
+ * Screen X of the first visible slot's left edge: the start padding plus the overflow left when
+ * the desired scroll for [RokuFocusListState.windowStart] clamps at the end of the list.
+ */
+internal fun windowLeftEdgePx(
+    state: RokuFocusListState,
+    itemWidthPx: Float,
+    itemSpacingPx: Float,
+    startPaddingPx: Float,
+    endPaddingPx: Float,
+    viewportWidthPx: Float
+): Float {
+    if (state.itemCount == 0) return startPaddingPx
     val stepPx = itemWidthPx + itemSpacingPx
     val totalContentPx = startPaddingPx +
         state.itemCount * itemWidthPx +
@@ -276,6 +344,6 @@ internal fun computeHighlightOffsetPx(
     val maxScrollPx = (totalContentPx - viewportWidthPx).coerceAtLeast(0f)
     val desiredScrollPx = state.windowStart * stepPx
     val scrollOverflowPx = (desiredScrollPx - maxScrollPx).coerceAtLeast(0f)
-    return startPaddingPx + scrollOverflowPx + state.highlightSlot * stepPx
+    return startPaddingPx + scrollOverflowPx
 }
 

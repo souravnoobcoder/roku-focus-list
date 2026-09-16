@@ -58,12 +58,15 @@ import com.rokufocus.DefaultRokuFocusConfig
 import com.rokufocus.RokuColumnState
 import com.rokufocus.RokuFocusConfig
 import com.rokufocus.RokuFocusEscape
+import com.rokufocus.RokuFocusGrid
 import com.rokufocus.RokuFocusMode
+import com.rokufocus.RokuRowEntry
 import com.rokufocus.RokuLazyColumn
 import com.rokufocus.RokuLazyRow
 import com.rokufocus.RokuNavKey
 import com.rokufocus.rememberRokuColumnState
 import com.rokufocus.rememberRokuFocusListState
+import com.rokufocus.rememberRokuGridState
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -88,7 +91,8 @@ private enum class Screen(val label: String, val icon: String) {
     ROW("Row", "R"),
     STATE("State", "S"),
     WRAP("Wrap", "W"),
-    FLOAT("Float", "F"),
+    STATIC("Static", "T"),
+    GRID("Grid", "G"),
     PLAIN("Plain", "P"),
 }
 
@@ -117,6 +121,13 @@ private val baseRows = listOf(
 )
 
 private const val ROW_COUNT = 100
+
+/**
+ * The demo browses the way Apple TV does: the highlight walks the visible cards and a vertical
+ * move lands on the card above (RokuFocusConfig.rowEntry defaults to Spatial). The Static screen
+ * keeps the 2.x look for comparison.
+ */
+private val DemoFocusMode = RokuFocusMode.Floating
 private val allRows: List<RowDef> = List(ROW_COUNT) { i ->
     val base = baseRows[i % baseRows.size]
     base.copy(title = "${i + 1}. ${base.title}")
@@ -193,7 +204,8 @@ fun StreamFocusDemoScreen() {
                     Screen.ROW     -> RowDslContent()
                     Screen.STATE   -> RowStateContent()
                     Screen.WRAP    -> WrapAroundContent()
-                    Screen.FLOAT   -> FloatingFocusContent(detailOpen = detailVisible, onOpenDetail = openDetail)
+                    Screen.STATIC  -> StaticFocusContent(detailOpen = detailVisible, onOpenDetail = openDetail)
+                    Screen.GRID    -> GridContent(detailOpen = detailVisible, onOpenDetail = openDetail)
                     Screen.PLAIN   -> PlainContent()
                 }
             }
@@ -230,13 +242,14 @@ private fun ColumnDslContent(
 
     ScreenShell(
         title = "RokuLazyColumn DSL",
-        subtitle = "$ROW_COUNT rows \u00b7 6 card types \u00b7 click a card for its detail page"
+        subtitle = "$ROW_COUNT rows \u00b7 6 card types \u00b7 floating focus, spatial row entry \u00b7 click a card for its detail page"
     ) {
         RokuLazyColumn(
             modifier = Modifier.fillMaxSize(),
             state = columnState,
             contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
             rowSpacing = 8.dp,
+                verticalFocusMode = DemoFocusMode,
             // Left goes back to the sidebar; the other three edges stay inside the list.
             config = DefaultRokuFocusConfig.copy(focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)),
             onItemClicked = { rowIndex, itemIndex ->
@@ -245,6 +258,7 @@ private fun ColumnDslContent(
         ) {
             allRows.forEach { rowDef ->
                 row(
+                    focusMode = DemoFocusMode,
                     itemWidth = rowDef.itemWidth,
                     itemHeight = rowDef.itemHeight,
                     itemSpacing = rowDef.itemSpacing,
@@ -293,6 +307,7 @@ private fun MixedRowsContent() {
             state = columnState,
             contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
             rowSpacing = 12.dp,
+                verticalFocusMode = DemoFocusMode,
             config = DefaultRokuFocusConfig.copy(
                 focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
             ),
@@ -338,6 +353,7 @@ private fun MixedRowsContent() {
             // No itemWidth/itemHeight/headerHeight: the column measures them from the first
             // card and the header, so any composable fits without size bookkeeping.
             row(
+                focusMode = DemoFocusMode,
                 contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
                 key = "trending",
                 header = { isRowFocused -> RowHeaderText("Trending Now", isRowFocused) }
@@ -350,6 +366,7 @@ private fun MixedRowsContent() {
             // Explicit sizes here override auto-measure: the circular highlight is designed
             // around the avatar image, not the card's full measured bounds (image + label).
             row(
+                focusMode = DemoFocusMode,
                 itemWidth = 150.dp,
                 itemHeight = 150.dp,
                 contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
@@ -365,6 +382,7 @@ private fun MixedRowsContent() {
             // Declared but empty: up/down steps straight over it and it takes up no height.
             // Also auto-sized — an empty row measures nothing until items arrive.
             row(
+                focusMode = DemoFocusMode,
                 contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
                 key = "continue-watching",
                 header = { isRowFocused -> RowHeaderText("Continue Watching (empty)", isRowFocused) }
@@ -375,6 +393,7 @@ private fun MixedRowsContent() {
             }
 
             row(
+                focusMode = DemoFocusMode,
                 contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
                 key = "new-releases",
                 header = { isRowFocused -> RowHeaderText("New Releases", isRowFocused) }
@@ -468,12 +487,14 @@ private fun LateRowsContent() {
             state = columnState,
             contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
             rowSpacing = 8.dp,
+                verticalFocusMode = DemoFocusMode,
             config = DefaultRokuFocusConfig.copy(
                 focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
             )
         ) {
             allRows.take(loadedRows).forEach { rowDef ->
                 row(
+                    focusMode = DemoFocusMode,
                     itemWidth = rowDef.itemWidth,
                     itemHeight = rowDef.itemHeight,
                     itemSpacing = rowDef.itemSpacing,
@@ -653,11 +674,11 @@ private fun WrapAroundContent() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4b. FLOATING FOCUS — the window holds still, the highlight walks it
+// 4b. STATIC FOCUS — the 2.x look: a fixed slot, rows scroll behind it, rows remember
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FloatingFocusContent(
+private fun StaticFocusContent(
     detailOpen: Boolean = false,
     onOpenDetail: (MovieItem) -> Unit = {}
 ) {
@@ -670,8 +691,8 @@ private fun FloatingFocusContent(
     }
 
     ScreenShell(
-        title = "Floating Focus",
-        subtitle = "verticalFocusMode = Floating · row 1 floats horizontally too · scrolls only at the window edges"
+        title = "Static Focus",
+        subtitle = "The 2.x look · fixed slot, rows scroll behind it · rowEntry = Remembered"
     ) {
         RokuLazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -679,9 +700,10 @@ private fun FloatingFocusContent(
             contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp),
             rowSpacing = 16.dp,
             config = DefaultRokuFocusConfig.copy(
-                focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
+                focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false),
+                rowEntry = RokuRowEntry.Remembered,
             ),
-            verticalFocusMode = RokuFocusMode.Floating,
+            verticalFocusMode = RokuFocusMode.Static,
             onItemClicked = { rowIndex, itemIndex ->
                 onOpenDetail(floatingRows[rowIndex].items[itemIndex])
             },
@@ -694,13 +716,8 @@ private fun FloatingFocusContent(
                     contentPadding = PaddingValues(start = 24.dp, end = 48.dp),
                     headerHeight = 30.dp,
                     key = rowDef.title,
-                    focusMode = if (i == 0) RokuFocusMode.Floating else RokuFocusMode.Static,
-                    header = { isRowFocused ->
-                        RowHeaderText(
-                            rowDef.title + if (i == 0) " (floating row)" else "",
-                            isRowFocused
-                        )
-                    }
+                    focusMode = RokuFocusMode.Static,
+                    header = { isRowFocused -> RowHeaderText(rowDef.title, isRowFocused) }
                 ) {
                     items(
                         items = rowDef.items,
@@ -714,12 +731,59 @@ private fun FloatingFocusContent(
     }
 }
 
-// Skips the 310dp banner so several rows share the viewport — that is what makes the
-// held-still window visible.
+// Skips the 310dp banner so several rows share the viewport.
 private val floatingRows: List<RowDef> = List(12) { i ->
     val base = baseRows[2 + (i % (baseRows.size - 2))]
     base.copy(title = "${i + 1}. ${base.title}")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GRID — RokuFocusGrid, floating by default
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun GridContent(
+    detailOpen: Boolean = false,
+    onOpenDetail: (MovieItem) -> Unit = {}
+) {
+    val gridState = rememberRokuGridState(itemCount = gridMovies.size, columns = GRID_COLUMNS)
+    LaunchedEffect(detailOpen) {
+        if (!detailOpen) {
+            delay(120)
+            gridState.requestFocus()
+        }
+    }
+
+    ScreenShell(
+        title = "Grid",
+        subtitle = "RokuFocusGrid · $GRID_COLUMNS columns · floats by default, scrolls only when the selection leaves the visible rows"
+    ) {
+        RokuFocusGrid(
+            state = gridState,
+            itemHeight = 220.dp,
+            modifier = Modifier.fillMaxSize(),
+            config = DefaultRokuFocusConfig.copy(
+                focusEscape = RokuFocusEscape(start = true, end = false, up = false, down = false)
+            ),
+            contentPadding = PaddingValues(start = 24.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
+            itemSpacing = 14.dp,
+            rowSpacing = 16.dp,
+            onItemClicked = { index -> onOpenDetail(gridMovies[index]) },
+            itemKey = { index -> gridMovies[index].id },
+            itemContentDescription = { index -> gridMovies[index].title },
+        ) { index, isFocused ->
+            // The grid hands each cell its width; the card fills it.
+            PortraitCard(gridMovies[index], isFocused, Modifier.fillMaxSize())
+        }
+    }
+}
+
+private const val GRID_COLUMNS = 5
+
+private val gridMovies: List<MovieItem> = baseRows
+    .flatMap { it.items }
+    .distinctBy { it.id }
+    .take(60)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. PLAIN — Standard LazyColumn + LazyRow for comparison
@@ -782,9 +846,11 @@ private fun ScreenShell(title: String, subtitle: String, content: @Composable ()
 }
 
 @Composable
+@Suppress("UNUSED_PARAMETER")
 private fun RowHeaderText(title: String, isRowFocused: Boolean) {
+    // One colour whichever row is focused: the highlight alone says where focus is.
     Text(text = title,
-        color = if (isRowFocused) Color.White else Color.White.copy(alpha = 0.6f),
+        color = Color.White.copy(alpha = 0.7f),
         fontSize = 18.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(start = 24.dp, bottom = 8.dp))
 }
@@ -859,9 +925,17 @@ private fun SidebarItem(
 
 @Preview(widthDp = 960, heightDp = 540)
 @Composable
-private fun FloatingFocusContentPreview() {
+private fun StaticFocusContentPreview() {
     RokuFocusTheme(darkTheme = true, dynamicColor = false) {
-        FloatingFocusContent()
+        StaticFocusContent()
+    }
+}
+
+@Preview(widthDp = 960, heightDp = 540)
+@Composable
+private fun GridContentPreview() {
+    RokuFocusTheme(darkTheme = true, dynamicColor = false) {
+        GridContent()
     }
 }
 

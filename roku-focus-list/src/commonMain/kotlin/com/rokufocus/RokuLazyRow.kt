@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -51,6 +52,7 @@ internal fun RokuLazyRowImpl(
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val hapticFeedback = LocalHapticFeedback.current
+    val touchpad = LocalRokuTouchpad.current
 
     // A row that leaves the composition is no longer focused, whatever the last event said.
     DisposableEffect(state) {
@@ -84,6 +86,7 @@ internal fun RokuLazyRowImpl(
                     liveRegion = LiveRegionMode.Polite
                 }
             }
+            .rokuTouchpadKeyGuard(touchpad)
             .rokuKeyHandler(
                 state = state,
                 config = config,
@@ -120,6 +123,20 @@ internal fun RokuLazyRowImpl(
             label = "roku_row_highlight_x"
         )
 
+        // Touchpad: bound while focused, leaning the focused card and the highlight. All of it
+        // resolves to nothing when no touchpad is provided.
+        val touchLean = rememberRokuTouchLean(touchpad, state.hasFocus)
+        val leanStyle = rememberRokuTouchLeanStyle(touchpad)
+        if (touchpad != null) {
+            val target = remember(state, config, itemWidthPx, itemSpacingPx, onItemSelected, onBoundaryHit) {
+                RowTouchTarget(state, config, itemWidthPx + itemSpacingPx, onItemSelected, onBoundaryHit)
+            }
+            BindRokuTouchpad(touchpad, target, state.hasFocus)
+        }
+        val focusedItemModifier = remember(touchLean, leanStyle) {
+            if (touchLean != null && leanStyle != null) Modifier.rokuTouchLean(touchLean, leanStyle) else Modifier
+        }
+
         RokuRowContent(
             state = state,
             contentPadding = contentPadding,
@@ -127,6 +144,7 @@ internal fun RokuLazyRowImpl(
             itemSpacing = itemSpacing,
             itemKey = itemKey,
             itemContentDescription = itemContentDescription,
+            focusedItemModifier = focusedItemModifier,
             itemContent = itemContent
         )
 
@@ -134,7 +152,12 @@ internal fun RokuLazyRowImpl(
         Box(modifier = Modifier.matchParentSize()) {
             Box(
                 modifier = Modifier
-                    .graphicsLayer { translationX = animatedHighlightX }
+                    .graphicsLayer {
+                        translationX = animatedHighlightX
+                        if (touchLean != null && leanStyle != null) {
+                            applyTouchLean(touchLean.value, leanStyle, leanStyle.highlightParallax)
+                        }
+                    }
                     .width(itemWidth)
                     .fillMaxHeight()
             ) {
@@ -146,4 +169,34 @@ internal fun RokuLazyRowImpl(
             }
         }
     }
+}
+
+/** A lone rail: items along it, nowhere to go vertically. */
+private class RowTouchTarget(
+    private val state: RokuFocusListState,
+    private val config: RokuFocusConfig,
+    private val itemPitchPx: Float,
+    private val onItemSelected: ((index: Int) -> Unit)?,
+    private val onBoundaryHit: (() -> Unit)?
+) : RokuTouchTarget {
+
+    override fun stepPx(orientation: Orientation): Float =
+        if (orientation == Orientation.Horizontal) itemPitchPx else 0f
+
+    override fun moveItems(steps: Int): Boolean {
+        var moved = false
+        rokuMoveBy(
+            state = state,
+            config = config,
+            steps = steps,
+            onSelected = { index ->
+                moved = true
+                onItemSelected?.invoke(index)
+            },
+            onBoundaryHit = onBoundaryHit
+        )
+        return moved
+    }
+
+    override fun moveRows(steps: Int): Boolean = false
 }

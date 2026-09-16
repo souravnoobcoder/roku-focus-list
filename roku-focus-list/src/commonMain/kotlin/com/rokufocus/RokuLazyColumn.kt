@@ -5,6 +5,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,6 +20,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -38,6 +40,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -65,7 +68,8 @@ private class ColumnGeometry(
     val endPadPx: FloatArray,
     val maxVerticalScrollPx: Float,
     val topPaddingPx: Float,
-    val viewportHeightPx: Float
+    val viewportHeightPx: Float,
+    val rowSpacingPx: Float
 )
 
 @Composable
@@ -90,6 +94,7 @@ internal fun RokuLazyColumnImpl(
     state.syncRows(rows.size) { rows[it].isSelectable }
 
     if (rows.isEmpty()) {
+        if (state.activeRowState != null) state.activeRowState = null
         DisposableEffect(state) {
             onDispose { state.hasFocus = false }
         }
@@ -98,19 +103,23 @@ internal fun RokuLazyColumnImpl(
 
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
+    val touchpad = LocalRokuTouchpad.current
     val lazyColumnState = rememberLazyListState()
 
     val selectedRowIndex = state.selectedRowIndex
     val activeRow = rows[selectedRowIndex]
     val activeItemIndex = rows.selectedItemIndexIn(selectedRowIndex)
 
+    // Published whether or not the column is focused: a touchpad swipe arrives from the host
+    // layer, not through Compose focus. Guarded, so an unchanged row costs no snapshot write.
+    val activeRowState = (activeRow as? RokuResolvedRow.Items)?.config?.state
+    if (state.activeRowState !== activeRowState) state.activeRowState = activeRowState
+
     // Rows learn whether they render as focused, so consumers reading RokuFocusListState.hasFocus
     // see the same thing the header lambda does. The previously focused state is tracked so the
     // column can retract what it asserted even when that row has since left the list — a hoisted
     // state must never be left reading "focused" by a column that no longer renders it.
-    val focusedRowState = (activeRow as? RokuResolvedRow.Items)
-        ?.config?.state
-        ?.takeIf { state.hasFocus }
+    val focusedRowState = activeRowState?.takeIf { state.hasFocus }
     val focusedRowRef = remember { FocusedRowRef() }
     if (focusedRowRef.value !== focusedRowState) {
         focusedRowRef.value?.hasFocus = false
@@ -120,6 +129,8 @@ internal fun RokuLazyColumnImpl(
     DisposableEffect(state) {
         onDispose {
             state.hasFocus = false
+            state.activeRowState = null
+            state.rowEntry = null
             focusedRowRef.value?.hasFocus = false
             focusedRowRef.value = null
         }
@@ -155,6 +166,7 @@ internal fun RokuLazyColumnImpl(
                     liveRegion = LiveRegionMode.Polite
                 }
             }
+            .rokuTouchpadKeyGuard(touchpad)
             .rokuColumnKeyHandler(rows, state, config, onItemSelected, onItemClicked)
     ) {
         val viewportWidthPx = with(density) { maxWidth.toPx() }
@@ -182,7 +194,7 @@ internal fun RokuLazyColumnImpl(
         // with nothing in it renders nothing, so it must contribute nothing to the geometry
         // either, or every row below it lands at the wrong Y). A selection move reads the cached
         // arrays and allocates nothing.
-        val geometry by remember(rows, density, layoutDirection, contentPadding, rowSpacing, maxHeight) {
+        val geometryState = remember(rows, density, layoutDirection, contentPadding, rowSpacing, maxHeight) {
             derivedStateOf {
                 val topPx = with(density) { contentPadding.calculateTopPadding().toPx() }
                 val bottomPx = with(density) { contentPadding.calculateBottomPadding().toPx() }
@@ -238,10 +250,24 @@ internal fun RokuLazyColumnImpl(
                     endPadPx = endPx,
                     maxVerticalScrollPx = (totalContent - viewportHeightPx).coerceAtLeast(0f),
                     topPaddingPx = topPx,
-                    viewportHeightPx = viewportHeightPx
+                    viewportHeightPx = viewportHeightPx,
+                    rowSpacingPx = spacingPx
                 )
             }
         }
+        val geometry by geometryState
+
+        // Spatial row entry: on a vertical move, the entered floating row selects the card under
+        // the highlight. Resolved from the derived geometry at the moment of the move, and the
+        // card is always inside that row's current window, so the row never scrolls sideways.
+        val rowEntry = remember(rows, geometryState, viewportWidthPx, config.rowEntry) {
+            if (config.rowEntry == RokuRowEntry.Spatial) {
+                SpatialRowEntry(rows, geometryState, viewportWidthPx)::enter
+            } else {
+                null
+            }
+        }
+        if (state.rowEntry !== rowEntry) state.rowEntry = rowEntry
 
         // ── Vertical scroll + overflow correction ──
         val scrollTargetRow = if (verticalFocusMode == RokuFocusMode.Floating) {
@@ -277,11 +303,27 @@ internal fun RokuLazyColumnImpl(
         // Keyed on the geometry as well as the scroll target: scrolling to the last row of a list
         // that is still loading gets clamped, and once later rows arrive the column would
         // otherwise sit at that clamped offset while the highlight maths assumed the unclamped one.
+        // A new key cancels the in-flight animation; the animator carries its velocity into the
+        // next one so successive row moves read as one scroll, not a restart per row.
+        val scrollAnimator = remember(lazyColumnState) { RokuScrollAnimator() }
         LaunchedEffect(scrollTargetRow, geometry) {
             if (state.keyRepeat.consecutivePresses > config.keyRepeatAccelAfter) {
+                scrollAnimator.reset()
                 lazyColumnState.scrollToItem(scrollTargetRow)
             } else {
-                lazyColumnState.animateScrollToItem(scrollTargetRow)
+                val cumOffsets = geometry.rowCumOffsetPx
+                val currentPx = cumOffsets.getOrElse(lazyColumnState.firstVisibleItemIndex) { 0f } +
+                    lazyColumnState.firstVisibleItemScrollOffset
+                val targetPx = lazyColumnState.targetOffsetPx(
+                    index = scrollTargetRow,
+                    currentPx = currentPx,
+                    estimatedPx = cumOffsets.getOrElse(scrollTargetRow) { 0f },
+                    maxScrollPx = geometry.maxVerticalScrollPx
+                )
+                scrollAnimator.scrollToIndex(
+                    lazyColumnState, scrollTargetRow, currentPx, targetPx, geometry.viewportHeightPx,
+                    spec = config.verticalAnimationSpec ?: DefaultScrollSpec
+                )
             }
         }
 
@@ -309,11 +351,26 @@ internal fun RokuLazyColumnImpl(
         // ── Animate highlight: full spec for position, fast tween for size ──
         val spec = config.highlightAnimationSpec
         val animatedX by animateFloatAsState(targetHighlightX, spec, label = "hl_x")
-        val animatedY by animateFloatAsState(targetHighlightY, spec, label = "hl_y")
+        val animatedY by animateFloatAsState(targetHighlightY, config.verticalAnimationSpec ?: spec, label = "hl_y")
         val animatedWidth by animateFloatAsState(targetHighlightWidth, HighlightSizeSpec, label = "hl_w")
         val animatedHeight by animateFloatAsState(
             geometry.contentHeightPx[selectedRowIndex], HighlightSizeSpec, label = "hl_h"
         )
+
+        // Touchpad: bound while the column holds focus; horizontal swipes go to the active rail (or
+        // to a custom row's onKeyEvent), vertical ones step rows, and the focused card and the
+        // highlight lean toward pending travel. Nothing here exists without a touchpad.
+        val touchLean = rememberRokuTouchLean(touchpad, state.hasFocus)
+        val leanStyle = rememberRokuTouchLeanStyle(touchpad)
+        if (touchpad != null) {
+            val target = remember(rows, state, config, geometryState, viewportWidthPx, onItemSelected) {
+                ColumnTouchTarget(rows, state, config, geometryState, viewportWidthPx, onItemSelected)
+            }
+            BindRokuTouchpad(touchpad, target, state.hasFocus)
+        }
+        val focusedItemModifier = remember(touchLean, leanStyle) {
+            if (touchLean != null && leanStyle != null) Modifier.rokuTouchLean(touchLean, leanStyle) else Modifier
+        }
 
         // The row content is remembered so LazyColumn receives the same lambda instance on every
         // selection recomposition — `rows` is a List (unstable), so without this the compiler
@@ -322,7 +379,7 @@ internal fun RokuLazyColumnImpl(
         // back inside each item's own scope via derivedStateOf, so a move recomposes exactly the
         // rows and items whose focus actually flipped.
         val rowItemContent: (@Composable LazyItemScope.(Int) -> Unit) =
-            remember(rows, state, rowHeader, itemContent) {
+            remember(rows, state, rowHeader, itemContent, focusedItemModifier) {
                 { rowIndex ->
                     val row = rows[rowIndex]
                     // Keyed on rowIndex: a keyed row that shifts position keeps its composition,
@@ -351,6 +408,7 @@ internal fun RokuLazyColumnImpl(
                                 itemKey = row.itemKey,
                                 itemContentDescription = row.config.itemContentDescription,
                                 rowFocused = { state.hasFocus && rowIndex == state.selectedRowIndex },
+                                focusedItemModifier = focusedItemModifier,
                                 itemContent = { itemIndex, isFocused ->
                                     itemContent(rowIndex, itemIndex, isFocused)
                                 }
@@ -391,6 +449,9 @@ internal fun RokuLazyColumnImpl(
                         .graphicsLayer {
                             translationX = animatedX
                             translationY = animatedY
+                            if (touchLean != null && leanStyle != null) {
+                                applyTouchLean(touchLean.value, leanStyle, leanStyle.highlightParallax)
+                            }
                         }
                         .layout { measurable, _ ->
                             val w = animatedWidth.roundToInt().coerceAtLeast(0)
@@ -412,6 +473,115 @@ internal fun RokuLazyColumnImpl(
 
 /** `CollectionInfo` treats a negative count as "unknown", which is right for ragged rails. */
 private const val UnknownColumnCount = -1
+
+/**
+ * A column of rails. Horizontal moves go through the active rail with the same edge policy and
+ * callbacks as a key press; on a custom row each step is one [RokuNavKey.Left] / [RokuNavKey.Right]
+ * to its `onKeyEvent`, since that is the only handle such a row has. Step sizes are read from the
+ * derived geometry at the time of the report, never captured.
+ */
+private class ColumnTouchTarget(
+    private val rows: List<RokuResolvedRow>,
+    private val state: RokuColumnState,
+    private val config: RokuFocusConfig,
+    private val geometry: State<ColumnGeometry>,
+    private val viewportWidthPx: Float,
+    private val onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)?
+) : RokuTouchTarget {
+
+    override fun stepPx(orientation: Orientation): Float {
+        val g = geometry.value
+        val row = state.selectedRowIndex
+        return if (orientation == Orientation.Horizontal) {
+            val pitch = g.itemWidthPx.getOrElse(row) { 0f } + g.itemSpacingPx.getOrElse(row) { 0f }
+            if (pitch > 0f) pitch else viewportWidthPx / CustomRowStepsPerViewport
+        } else {
+            g.rowHeightsPx.getOrElse(row) { 0f } + g.rowSpacingPx
+        }
+    }
+
+    override fun moveItems(steps: Int): Boolean {
+        val active = rows.getOrNull(state.selectedRowIndex)
+        if (active is RokuResolvedRow.Custom) {
+            val onKey = active.onKeyEvent ?: return false
+            val key = if (steps > 0) RokuNavKey.Right else RokuNavKey.Left
+            var moved = false
+            repeat(abs(steps)) { if (onKey(key)) moved = true }
+            return moved
+        }
+        var moved = false
+        rokuMoveItemsBy(
+            state = state,
+            config = config,
+            steps = steps,
+            onSelected = { rowIndex, itemIndex ->
+                moved = true
+                onItemSelected?.invoke(rowIndex, itemIndex)
+            }
+        )
+        return moved
+    }
+
+    override fun moveRows(steps: Int): Boolean {
+        var moved = false
+        rokuMoveRowsBy(
+            state = state,
+            config = config,
+            steps = steps,
+            onSelected = { rowIndex ->
+                moved = true
+                onItemSelected?.invoke(rowIndex, rows.selectedItemIndexIn(rowIndex))
+            }
+        )
+        return moved
+    }
+}
+
+/** A custom row has no item pitch; a step is taken to be this fraction of the viewport. */
+private const val CustomRowStepsPerViewport = 5f
+
+/**
+ * [RokuRowEntry.Spatial] for a column: the entered row's card under the centre of the highlight
+ * being left. Leaving or entering a custom row, or entering a Static row, leaves the row's own
+ * selection alone — a Static row already has its remembered card under the slot.
+ */
+private class SpatialRowEntry(
+    private val rows: List<RokuResolvedRow>,
+    private val geometry: State<ColumnGeometry>,
+    private val viewportWidthPx: Float
+) {
+    fun enter(fromRow: Int, toRow: Int) {
+        val from = rows.getOrNull(fromRow) as? RokuResolvedRow.Items ?: return
+        val to = rows.getOrNull(toRow) as? RokuResolvedRow.Items ?: return
+        val toState = to.config.state
+        if (toState.focusMode != RokuFocusMode.Floating || toState.itemCount == 0) return
+        val g = geometry.value
+        if (fromRow > g.itemWidthPx.lastIndex || toRow > g.itemWidthPx.lastIndex) return
+
+        val centreX = computeHighlightOffsetPx(
+            from.config.state,
+            g.itemWidthPx[fromRow], g.itemSpacingPx[fromRow],
+            g.startPadPx[fromRow], g.endPadPx[fromRow],
+            viewportWidthPx
+        ) + g.itemWidthPx[fromRow] / 2f
+
+        val windowLeft = windowLeftEdgePx(
+            toState,
+            g.itemWidthPx[toRow], g.itemSpacingPx[toRow],
+            g.startPadPx[toRow], g.endPadPx[toRow],
+            viewportWidthPx
+        )
+        val slot = slotUnder(
+            centreX = centreX,
+            windowLeftPx = windowLeft,
+            itemWidthPx = g.itemWidthPx[toRow],
+            stepPx = g.itemWidthPx[toRow] + g.itemSpacingPx[toRow],
+            visibleCount = toState.visibleCount
+        )
+        val index = (toState.windowStart + slot).coerceIn(0, toState.itemCount - 1)
+        if (index != toState.selectedIndex) toState.scrollTo(index)
+    }
+}
 
 /**
  * Where the vertical floating window must start so the selected row is fully visible, moved
