@@ -185,7 +185,7 @@ private fun ColumnDslLayout(mode: RokuFocusMode, onSelected: (Int, Int) -> Unit)
                 contentPadding = RailPadding,
                 key = title,
                 focusMode = mode,
-                header = { isRowFocused -> RowHeader(title, isRowFocused) },
+                header = { RowHeader(title) },
             ) {
                 items(items, key = { it.id }, contentDescription = { it.name }) { item, isFocused ->
                     Card(item.name, isFocused)
@@ -224,7 +224,7 @@ private fun ColumnStateLayout(mode: RokuFocusMode, onSelected: (Int, Int) -> Uni
         rowSpacing = RowSpacing,
         focusHighlight = { isFocused -> SampleHighlight(isFocused) },
         onItemSelected = onSelected,
-        rowHeader = { rowIndex, isRowFocused -> RowHeader(sections[rowIndex].first, isRowFocused) },
+        rowHeader = { rowIndex, _ -> RowHeader(sections[rowIndex].first) },
         verticalFocusMode = mode,
     ) { rowIndex, itemIndex, isFocused ->
         Card(sections[rowIndex].second[itemIndex].name, isFocused)
@@ -239,7 +239,7 @@ private fun StandaloneRowLayout(mode: RokuFocusMode, onSelected: (Int, Int) -> U
     RequestFocusWhenReady(rowState) { rowState.requestFocus() }
 
     Column {
-        RowHeader(title, rowState.hasFocus)
+        RowHeader(title)
         RokuLazyRow(
             config = SampleConfig,
             contentPadding = RailPadding,
@@ -320,15 +320,15 @@ private fun SelectionReadout(selection: String, frames: String) {
     }
 }
 
-/** Exactly [RowHeaderHeight] tall: the state-based column is told that height and trusts it. */
+/**
+ * Exactly [RowHeaderHeight] tall: the state-based column is told that height and trusts it. One
+ * colour whether or not its row is focused — the highlight is the only thing that moves.
+ */
 @Composable
-private fun RowHeader(text: String, isRowFocused: Boolean) {
+private fun RowHeader(text: String) {
     BasicText(
         text = text,
-        style = TextStyle(
-            color = if (isRowFocused) Color.White else Color.White.copy(alpha = 0.5f),
-            fontSize = 18.sp,
-        ),
+        style = TextStyle(color = Color.White.copy(alpha = 0.7f), fontSize = 18.sp),
         modifier = Modifier.height(RowHeaderHeight).padding(start = 48.dp, bottom = 8.dp),
     )
 }
@@ -399,7 +399,7 @@ private fun CardPreview() {
 @Composable
 private fun RowHeaderPreview() {
     Column(modifier = Modifier.background(Color(0xFF0B0B0B))) {
-        RowHeader("Trending Now", isRowFocused = true)
-        RowHeader("New Releases", isRowFocused = false)
+        RowHeader("Trending Now")
+        RowHeader("New Releases")
     }
 }
