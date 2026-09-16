@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-16
+
 ### Added
 
 - **Velocity-scaled multi-step navigation for touchpad remotes.** `RokuFocusListState.moveBy(steps)` and `RokuColumnState.moveRowsBy(steps)` move the selection N items or rows as **one logical move**: one selection change, one `onItemSelected`, one highlight animation and one scroll, however many items it covers — the coalescing a consumer cannot build from outside by calling `moveNext()` in a loop. Moves clamp at the ends; `wrapAround` applies only when already parked on the edge being pushed, exactly like single steps; `moveBy(0)` is a no-op. `moveNext()` / `movePrevious()` are now implemented on top of the same core and behave identically to `moveBy(±1)`. `moveRowsBy` steps over rows with nothing to select the way UP/DOWN do.
@@ -27,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `sample-tvos/`: a runnable Apple TV sample with the Xcode project to host it, showing the library in all four layouts (the `row { }` DSL column, the state-based column, a standalone DSL `RokuLazyRow` with a hoisted state, and `RokuFocusGrid`), each in both focus modes — Play/Pause on the remote steps through the eight scenes — with the one-line `RokuTouchpad` wiring and nothing gesture-related in the screens themselves. An on-screen readout shows the last selection and the frame timing the move produced against the panel's real refresh rate.
 
-- 69 new tests: `RokuGridStateTest` (shape, row-end walls, reading-order flow with `wrapAround`, column-keeping row moves into a shorter last row, floating containment in one hop, static parking, shrink-and-regrow, column changes, key-repeat reset, saver), floating multi-step containment for rails and columns, a far vertical jump, `RokuMoveByTest` (bounds, wrap-around, single-step parity, the coalescing assertion by *counting* `onItemSelected`, edge policy once, partly-consumable moves, the key-repeat arbiter on both paths, and `moveItemsBy` / `rokuMoveItemsBy` through the column's active row) and `RokuTouchpadTest` (a brush leans without moving, one step moves one and leaves the remainder as lean, coalescing, no coast after lift-off, screen direction on both axes, axis lock, velocity gain, edge pin and one-step reversal, a clean new contact, host units via `pxPerUnit`, per-axis step fractions, a missing `panBegan`, no bound component, the key-leak guard window, and the gain curve).
+- 84 new tests: `RokuGridStateTest` (shape, row-end walls, reading-order flow with `wrapAround`, column-keeping row moves into a shorter last row, floating containment in one hop, static parking, shrink-and-regrow, column changes, key-repeat reset, saver), floating multi-step containment for rails and columns, a far vertical jump, `RokuMoveByTest` (bounds, wrap-around, single-step parity, the coalescing assertion by *counting* `onItemSelected`, edge policy once, partly-consumable moves, the key-repeat arbiter on both paths, and `moveItemsBy` / `rokuMoveItemsBy` through the column's active row) and `RokuTouchpadTest` (a brush leans without moving, one step moves one and leaves the remainder as lean, coalescing, no coast after lift-off, screen direction on both axes, axis lock, velocity gain, edge pin and one-step reversal, a clean new contact, host units via `pxPerUnit`, per-axis step fractions, a missing `panBegan`, no bound component, the key-leak guard window, and the gain curve), `RokuRowEntryTest` (the slot maths, no sideways scroll for every slot and for a short row, the entry hook's timing and once-per-move behaviour, wrap-around, the programmatic jump, the default) and the vertical key-repeat delay in `RokuKeyRepeatTrackerTest`.
 
 ### Changed
 
@@ -153,6 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Callbacks: `onItemSelected`, `onItemClicked`, `onFocusEnter`, `onFocusExit`.
 - Demo app with 10 rows, 6 card types, 308 items.
 
-[Unreleased]: https://github.com/souravnoobcoder/roku-focus-list/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.3.0...HEAD
+[2.3.0]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.2.0...2.3.0
 [2.0.0]: https://github.com/souravnoobcoder/roku-focus-list/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/souravnoobcoder/roku-focus-list/releases/tag/v1.0.0
