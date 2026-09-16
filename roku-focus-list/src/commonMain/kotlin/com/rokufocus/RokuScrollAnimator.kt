@@ -42,14 +42,17 @@ internal class RokuScrollAnimator {
         index: Int,
         currentPx: Float,
         targetPx: Float,
-        viewportPx: Float
-    ) = animateTo(listState, currentPx, targetPx, viewportPx) { listState.animateScrollToItem(index) }
+        viewportPx: Float,
+        spec: AnimationSpec<Float> = DefaultScrollSpec
+    ) = animateTo(listState, currentPx, targetPx, viewportPx, spec) { listState.animateScrollToItem(index) }
 
     /**
      * @param scrollable The list or grid to drive.
      * @param currentPx Absolute scroll offset of the list right now.
      * @param targetPx Absolute scroll offset to reach, already clamped to what the list can scroll.
      * @param viewportPx Main-axis size of the viewport; 0 when the list has not been laid out yet.
+     * @param spec The curve. The default is the spring `animateScrollToItem` uses; a consumer's
+     *   `verticalAnimationSpec` arrives here so the scroll and the highlight share one curve.
      * @param farJump Taken instead when the distance exceeds a viewport or nothing is laid out
      *   yet — the caller's `animateScrollToItem`, whose teleporting suits that case.
      */
@@ -58,6 +61,7 @@ internal class RokuScrollAnimator {
         currentPx: Float,
         targetPx: Float,
         viewportPx: Float,
+        spec: AnimationSpec<Float> = DefaultScrollSpec,
         farJump: suspend () -> Unit
     ) {
         if (viewportPx <= 0f || abs(targetPx - currentPx) > viewportPx) {
@@ -72,7 +76,7 @@ internal class RokuScrollAnimator {
         scrollable.scroll {
             animation.animateTo(
                 targetValue = targetPx,
-                animationSpec = ScrollSpec,
+                animationSpec = spec,
                 sequentialAnimation = animation.velocity != 0f
             ) {
                 // A spring carrying velocity can overshoot; the list is clamped to the segment.
@@ -86,7 +90,7 @@ internal class RokuScrollAnimator {
 }
 
 /** Same spec `animateScrollToItem` uses, so a lone D-pad step is timed exactly as before. */
-private val ScrollSpec: AnimationSpec<Float> = spring()
+internal val DefaultScrollSpec: AnimationSpec<Float> = spring()
 
 private const val EndOfListTolerancePx = 0.5f
 

@@ -35,7 +35,7 @@ internal fun Modifier.rokuColumnKeyHandler(
     when (keyEvent.key) {
         // ── Vertical: move between rows, stepping over rows with nothing to select ──
         Key.DirectionUp, Key.DirectionDown -> {
-            if (repeat.isThrottled(now, config)) return@onPreviewKeyEvent true
+            if (repeat.isThrottled(now, config, vertical = true)) return@onPreviewKeyEvent true
             val step = if (keyEvent.key == Key.DirectionUp) -1 else 1
             val target = nextSelectableRow(rows.size, rowIndex, step) { rows[it].isSelectable }
             if (target >= 0) {

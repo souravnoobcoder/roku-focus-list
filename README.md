@@ -698,10 +698,22 @@ RokuLazyRow(config = config) { /* items */ }
 | `wrapAround` | `Boolean` | `false` | Wrap from last item to first and vice versa |
 | `hapticFeedback` | `Boolean` | `true` | Vibrate on boundary hit. No-op on desktop and web. |
 | `focusEscape` | `RokuFocusEscape` | `All` | Per-edge control over letting focus leave the list |
+| `verticalAnimationSpec` | `AnimationSpec<Float>?` | `null` | Speed of a vertical move in a column or grid: drives the highlight's Y **and** the content scroll between rows together. Null keeps `highlightAnimationSpec` for the highlight and the default spring for the scroll. |
+| `verticalKeyRepeatDelayMs` | `Long?` | `null` | Throttle for held UP/DOWN before acceleration. Null uses `keyRepeatDelayMs`. Slows a held D-pad down the column without slowing it along a row. |
 | `rowEntry` | `RokuRowEntry` | `Spatial` | Which card a vertical move lands on when entering a floating row: the one under the highlight, or the row's remembered one. See [Entering a row](#entering-a-row-spatial-or-remembered). |
 
 Touchpad pacing and the focus-movement hint are configured on `RokuTouchpadConfig`, not here — see
 [Touchpad remotes](#touchpad-remotes).
+
+Vertical moves can be paced separately from horizontal ones — the highlight and the content travel
+between rows on the same curve, so raising or lowering one never detaches the other:
+
+```kotlin
+RokuFocusConfig(
+    verticalAnimationSpec = tween(350, easing = FastOutSlowInEasing),  // slower row-to-row travel
+    verticalKeyRepeatDelayMs = 220L,                                    // a held DOWN steps rows less often
+)
+```
 
 Built-in animation presets:
 

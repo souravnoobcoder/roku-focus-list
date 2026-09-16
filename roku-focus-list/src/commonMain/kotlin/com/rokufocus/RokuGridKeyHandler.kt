@@ -26,7 +26,7 @@ internal fun Modifier.rokuGridKeyHandler(
     repeat.resetIfIdle(now)
 
     fun step(orientation: Orientation, forward: Boolean): Boolean {
-        if (repeat.isThrottled(now, config)) return true
+        if (repeat.isThrottled(now, config, vertical = orientation == Orientation.Vertical)) return true
         val direction = if (forward) 1 else -1
         val moved = if (orientation == Orientation.Horizontal) {
             state.moveColumnSteps(direction, config.wrapAround) != 0

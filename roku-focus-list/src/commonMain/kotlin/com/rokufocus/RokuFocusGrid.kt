@@ -150,7 +150,10 @@ internal fun RokuFocusGridImpl(
                 val visible = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == firstIndex }
                 val targetPx = (if (visible != null) currentPx + visible.offset.y else startRow * rowPitchPx)
                     .coerceIn(0f, maxScrollPx)
-                scrollAnimator.animateTo(gridState, currentPx, targetPx, viewportHeightPx) {
+                scrollAnimator.animateTo(
+                    gridState, currentPx, targetPx, viewportHeightPx,
+                    spec = config.verticalAnimationSpec ?: DefaultScrollSpec
+                ) {
                     gridState.animateScrollToItem(firstIndex)
                 }
             }
@@ -162,7 +165,9 @@ internal fun RokuFocusGridImpl(
         val targetX = startPadPx + state.selectedColumn * (cellWidthPx + itemSpacingPx)
         val targetY = topPadPx + overflowPx + state.highlightRowSlot * rowPitchPx
         val animatedX by animateFloatAsState(targetX, config.highlightAnimationSpec, label = "roku_grid_hl_x")
-        val animatedY by animateFloatAsState(targetY, config.highlightAnimationSpec, label = "roku_grid_hl_y")
+        val animatedY by animateFloatAsState(
+            targetY, config.verticalAnimationSpec ?: config.highlightAnimationSpec, label = "roku_grid_hl_y"
+        )
 
         // Touchpad: along the row for horizontal travel, whole rows for vertical, with the focused
         // cell and the highlight leaning toward pending travel. Nothing here exists without one.

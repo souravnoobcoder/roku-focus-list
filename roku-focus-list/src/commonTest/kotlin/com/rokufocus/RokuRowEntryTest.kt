@@ -139,5 +139,7 @@ class RokuRowEntryTest {
         assertTrue(positional.wrapAround)
         assertEquals(RokuFocusEscape.None, positional.focusEscape)
         assertEquals(RokuRowEntry.Spatial, positional.rowEntry)
+        assertEquals(null, positional.verticalAnimationSpec)
+        assertEquals(null, positional.verticalKeyRepeatDelayMs)
     }
 }

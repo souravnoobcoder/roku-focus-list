@@ -321,7 +321,8 @@ internal fun RokuLazyColumnImpl(
                     maxScrollPx = geometry.maxVerticalScrollPx
                 )
                 scrollAnimator.scrollToIndex(
-                    lazyColumnState, scrollTargetRow, currentPx, targetPx, geometry.viewportHeightPx
+                    lazyColumnState, scrollTargetRow, currentPx, targetPx, geometry.viewportHeightPx,
+                    spec = config.verticalAnimationSpec ?: DefaultScrollSpec
                 )
             }
         }
@@ -350,7 +351,7 @@ internal fun RokuLazyColumnImpl(
         // ── Animate highlight: full spec for position, fast tween for size ──
         val spec = config.highlightAnimationSpec
         val animatedX by animateFloatAsState(targetHighlightX, spec, label = "hl_x")
-        val animatedY by animateFloatAsState(targetHighlightY, spec, label = "hl_y")
+        val animatedY by animateFloatAsState(targetHighlightY, config.verticalAnimationSpec ?: spec, label = "hl_y")
         val animatedWidth by animateFloatAsState(targetHighlightWidth, HighlightSizeSpec, label = "hl_w")
         val animatedHeight by animateFloatAsState(
             geometry.contentHeightPx[selectedRowIndex], HighlightSizeSpec, label = "hl_h"

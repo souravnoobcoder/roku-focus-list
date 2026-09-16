@@ -26,8 +26,17 @@ val DefaultRokuFocusConfig = RokuFocusConfig()
  *   leave the list. See [RokuFocusEscape]. Touchpad pacing lives on [RokuTouchpadConfig].
  * @property rowEntry Which card a vertical move in a [RokuLazyColumn] lands on when it enters a
  *   floating row: the card under the highlight ([RokuRowEntry.Spatial], the default) or the one
- *   the row last had ([RokuRowEntry.Remembered]). Appended last so positional 2.x calls keep
- *   their meaning.
+ *   the row last had ([RokuRowEntry.Remembered]).
+ * @property verticalAnimationSpec Speed of a vertical move in [RokuLazyColumn] and
+ *   [RokuFocusGrid]: drives both the highlight's Y and the content scroll between rows, so the
+ *   two travel together. Null keeps [highlightAnimationSpec] for the highlight and the library's
+ *   default spring for the scroll. Horizontal moves are unaffected.
+ * @property verticalKeyRepeatDelayMs Minimum gap between two accepted UP/DOWN presses while the
+ *   key is held, before acceleration. Null uses [keyRepeatDelayMs]. Raise it to slow a held
+ *   D-pad down the column without slowing it along a row.
+ *
+ * The parameters after `focusEscape` are appended in the order they were added so positional
+ * 2.x calls keep their meaning.
  */
 data class RokuFocusConfig(
     val highlightAnimationSpec: AnimationSpec<Float> = DefaultHighlightAnimationSpec,
@@ -37,7 +46,9 @@ data class RokuFocusConfig(
     val wrapAround: Boolean = false,
     val hapticFeedback: Boolean = true,
     val focusEscape: RokuFocusEscape = RokuFocusEscape.All,
-    val rowEntry: RokuRowEntry = RokuRowEntry.Spatial
+    val rowEntry: RokuRowEntry = RokuRowEntry.Spatial,
+    val verticalAnimationSpec: AnimationSpec<Float>? = null,
+    val verticalKeyRepeatDelayMs: Long? = null
 )
 
 /**
