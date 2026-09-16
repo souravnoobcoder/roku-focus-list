@@ -24,6 +24,10 @@ val DefaultRokuFocusConfig = RokuFocusConfig()
  * @property hapticFeedback Pulse when a press cannot move the selection.
  * @property focusEscape Per-edge control over whether unconsumed edge presses let platform focus
  *   leave the list. See [RokuFocusEscape]. Touchpad pacing lives on [RokuTouchpadConfig].
+ * @property rowEntry Which card a vertical move in a [RokuLazyColumn] lands on when it enters a
+ *   floating row: the card under the highlight ([RokuRowEntry.Spatial], the default) or the one
+ *   the row last had ([RokuRowEntry.Remembered]). Appended last so positional 2.x calls keep
+ *   their meaning.
  */
 data class RokuFocusConfig(
     val highlightAnimationSpec: AnimationSpec<Float> = DefaultHighlightAnimationSpec,
@@ -32,7 +36,8 @@ data class RokuFocusConfig(
     val keyRepeatFastDelayMs: Long = 50L,
     val wrapAround: Boolean = false,
     val hapticFeedback: Boolean = true,
-    val focusEscape: RokuFocusEscape = RokuFocusEscape.All
+    val focusEscape: RokuFocusEscape = RokuFocusEscape.All,
+    val rowEntry: RokuRowEntry = RokuRowEntry.Spatial
 )
 
 /**

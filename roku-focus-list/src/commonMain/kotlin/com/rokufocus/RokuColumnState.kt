@@ -98,11 +98,28 @@ class RokuColumnState(initialRowIndex: Int = 0) {
         internal set
 
     /**
+     * Set by [RokuLazyColumn] when [RokuFocusConfig.rowEntry] is [RokuRowEntry.Spatial]: given the
+     * row being left and the row being entered, selects the entered row's card under the
+     * highlight. Only the composable has the pixel geometry, which is why the state delegates.
+     * A plain field: nothing observes it.
+     */
+    internal var rowEntry: ((fromRow: Int, toRow: Int) -> Unit)? = null
+
+    /**
      * Selects [index], remembering it as the request even when the column is currently shorter or
-     * that row has no items yet.
+     * that row has no items yet. A plain jump: the entered row keeps its own selection. The
+     * D-pad, [moveRowsBy] and touchpad paths go through [stepToRow] instead, which applies
+     * [RokuFocusConfig.rowEntry].
      */
     fun moveToRow(index: Int) {
         _requestedRowIndex = index.coerceAtLeast(0)
+    }
+
+    /** A user-driven move onto [index]: resolves where in that row the highlight lands, then moves. */
+    internal fun stepToRow(index: Int) {
+        val from = selectedRowIndex
+        if (index != from) rowEntry?.invoke(from, index)
+        moveToRow(index)
     }
 
     /**
@@ -172,11 +189,11 @@ class RokuColumnState(initialRowIndex: Int = 0) {
                 rowSelectable
             )
             if (wrapTarget < 0 || wrapTarget == start) return 0
-            moveToRow(wrapTarget)
+            stepToRow(wrapTarget)
             return abs(steps)
         }
 
-        moveToRow(current)
+        stepToRow(current)
         return consumed
     }
 

@@ -39,7 +39,7 @@ internal fun Modifier.rokuColumnKeyHandler(
             val step = if (keyEvent.key == Key.DirectionUp) -1 else 1
             val target = nextSelectableRow(rows.size, rowIndex, step) { rows[it].isSelectable }
             if (target >= 0) {
-                state.moveToRow(target)
+                state.stepToRow(target)
                 repeat.accept(now)
                 onItemSelected?.invoke(target, rows.selectedItemIndexIn(target))
                 true

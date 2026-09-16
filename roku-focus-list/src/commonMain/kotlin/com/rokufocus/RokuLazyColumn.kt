@@ -130,6 +130,7 @@ internal fun RokuLazyColumnImpl(
         onDispose {
             state.hasFocus = false
             state.activeRowState = null
+            state.rowEntry = null
             focusedRowRef.value?.hasFocus = false
             focusedRowRef.value = null
         }
@@ -255,6 +256,18 @@ internal fun RokuLazyColumnImpl(
             }
         }
         val geometry by geometryState
+
+        // Spatial row entry: on a vertical move, the entered floating row selects the card under
+        // the highlight. Resolved from the derived geometry at the moment of the move, and the
+        // card is always inside that row's current window, so the row never scrolls sideways.
+        val rowEntry = remember(rows, geometryState, viewportWidthPx, config.rowEntry) {
+            if (config.rowEntry == RokuRowEntry.Spatial) {
+                SpatialRowEntry(rows, geometryState, viewportWidthPx)::enter
+            } else {
+                null
+            }
+        }
+        if (state.rowEntry !== rowEntry) state.rowEntry = rowEntry
 
         // ── Vertical scroll + overflow correction ──
         val scrollTargetRow = if (verticalFocusMode == RokuFocusMode.Floating) {
@@ -525,6 +538,49 @@ private class ColumnTouchTarget(
 
 /** A custom row has no item pitch; a step is taken to be this fraction of the viewport. */
 private const val CustomRowStepsPerViewport = 5f
+
+/**
+ * [RokuRowEntry.Spatial] for a column: the entered row's card under the centre of the highlight
+ * being left. Leaving or entering a custom row, or entering a Static row, leaves the row's own
+ * selection alone — a Static row already has its remembered card under the slot.
+ */
+private class SpatialRowEntry(
+    private val rows: List<RokuResolvedRow>,
+    private val geometry: State<ColumnGeometry>,
+    private val viewportWidthPx: Float
+) {
+    fun enter(fromRow: Int, toRow: Int) {
+        val from = rows.getOrNull(fromRow) as? RokuResolvedRow.Items ?: return
+        val to = rows.getOrNull(toRow) as? RokuResolvedRow.Items ?: return
+        val toState = to.config.state
+        if (toState.focusMode != RokuFocusMode.Floating || toState.itemCount == 0) return
+        val g = geometry.value
+        if (fromRow > g.itemWidthPx.lastIndex || toRow > g.itemWidthPx.lastIndex) return
+
+        val centreX = computeHighlightOffsetPx(
+            from.config.state,
+            g.itemWidthPx[fromRow], g.itemSpacingPx[fromRow],
+            g.startPadPx[fromRow], g.endPadPx[fromRow],
+            viewportWidthPx
+        ) + g.itemWidthPx[fromRow] / 2f
+
+        val windowLeft = windowLeftEdgePx(
+            toState,
+            g.itemWidthPx[toRow], g.itemSpacingPx[toRow],
+            g.startPadPx[toRow], g.endPadPx[toRow],
+            viewportWidthPx
+        )
+        val slot = slotUnder(
+            centreX = centreX,
+            windowLeftPx = windowLeft,
+            itemWidthPx = g.itemWidthPx[toRow],
+            stepPx = g.itemWidthPx[toRow] + g.itemSpacingPx[toRow],
+            visibleCount = toState.visibleCount
+        )
+        val index = (toState.windowStart + slot).coerceIn(0, toState.itemCount - 1)
+        if (index != toState.selectedIndex) toState.scrollTo(index)
+    }
+}
 
 /**
  * Where the vertical floating window must start so the selected row is fully visible, moved

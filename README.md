@@ -508,6 +508,32 @@ window has no fixed slot — so it is ignored in `Floating`.
 
 ---
 
+## Entering a row: spatial or remembered
+
+When a vertical move enters a row, which card does the highlight land on? Two answers exist on TV:
+
+- **Spatial** (the default, and what the tvOS focus engine does): the card physically under the
+  highlight — the one whose frame contains the highlight's centre, or the nearest one if none does.
+  Go down and back up, and you are on the card you were above, not the card that row last had.
+- **Remembered** (Roku, Android TV Leanback, and this library before 2.3.0): the card the row
+  selected last, wherever it sits on screen.
+
+```kotlin
+RokuFocusConfig(rowEntry = RokuRowEntry.Remembered)   // the 2.x behaviour
+```
+
+Only **floating** rows can tell the two apart. A Static row scrolls its remembered card under the
+fixed slot, so the card above the highlight is the remembered one either way, and Static rows are
+left alone. In a floating row the highlight walks and rows scroll independently, and there the
+difference is the one you feel on every second D-pad press.
+
+The entered row is **never scrolled sideways** to line anything up: the chosen card is always one
+already on screen inside the row's current window, so the highlight simply lands on it. Leaving or
+entering a `customRow` keeps the row's own selection. `RokuFocusGrid` needs nothing here — its
+cells are aligned, and moving between rows already keeps the column.
+
+---
+
 ## Grid (`RokuFocusGrid`)
 
 A wall of equal-size cells — an "all titles" screen, a channel guide, a settings grid — N columns
@@ -672,6 +698,7 @@ RokuLazyRow(config = config) { /* items */ }
 | `wrapAround` | `Boolean` | `false` | Wrap from last item to first and vice versa |
 | `hapticFeedback` | `Boolean` | `true` | Vibrate on boundary hit. No-op on desktop and web. |
 | `focusEscape` | `RokuFocusEscape` | `All` | Per-edge control over letting focus leave the list |
+| `rowEntry` | `RokuRowEntry` | `Spatial` | Which card a vertical move lands on when entering a floating row: the one under the highlight, or the row's remembered one. See [Entering a row](#entering-a-row-spatial-or-remembered). |
 
 Touchpad pacing and the focus-movement hint are configured on `RokuTouchpadConfig`, not here — see
 [Touchpad remotes](#touchpad-remotes).
@@ -873,6 +900,7 @@ library's users.
 | `RokuTouchpadConfig` | Pacing (step fractions, axis lock, velocity gain) and hint tuning (light, travel, tilt, lift, parallax, release spring). |
 | `RokuFocusMode` | Per-axis `Static` (fixed slot, content scrolls) vs `Floating` (highlight walks, scrolls at window edges). |
 | `RokuFocusEscape` | Per-edge focus escape. |
+| `RokuRowEntry` | `Spatial` (the card under the highlight, default) vs `Remembered` (the row's last card) when a vertical move enters a floating row. |
 | `RokuHighlightScope` | Receiver of `focusHighlight`: `BoxScope` + `rowIndex`, `itemIndex`. |
 | `RokuNavKey` | `Left` / `Right` / `Enter`, handed to `customRow`'s `onKeyEvent`. |
 | `RokuColumnRowConfig` | One row of the state-based `RokuLazyColumn`. |

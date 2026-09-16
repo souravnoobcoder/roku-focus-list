@@ -319,6 +319,23 @@ internal fun computeHighlightOffsetPx(
     viewportWidthPx: Float
 ): Float {
     if (state.itemCount == 0) return startPaddingPx
+    return windowLeftEdgePx(state, itemWidthPx, itemSpacingPx, startPaddingPx, endPaddingPx, viewportWidthPx) +
+        state.highlightSlot * (itemWidthPx + itemSpacingPx)
+}
+
+/**
+ * Screen X of the first visible slot's left edge: the start padding plus the overflow left when
+ * the desired scroll for [RokuFocusListState.windowStart] clamps at the end of the list.
+ */
+internal fun windowLeftEdgePx(
+    state: RokuFocusListState,
+    itemWidthPx: Float,
+    itemSpacingPx: Float,
+    startPaddingPx: Float,
+    endPaddingPx: Float,
+    viewportWidthPx: Float
+): Float {
+    if (state.itemCount == 0) return startPaddingPx
     val stepPx = itemWidthPx + itemSpacingPx
     val totalContentPx = startPaddingPx +
         state.itemCount * itemWidthPx +
@@ -327,6 +344,6 @@ internal fun computeHighlightOffsetPx(
     val maxScrollPx = (totalContentPx - viewportWidthPx).coerceAtLeast(0f)
     val desiredScrollPx = state.windowStart * stepPx
     val scrollOverflowPx = (desiredScrollPx - maxScrollPx).coerceAtLeast(0f)
-    return startPaddingPx + scrollOverflowPx + state.highlightSlot * stepPx
+    return startPaddingPx + scrollOverflowPx
 }
 
