@@ -732,7 +732,7 @@ points on tvOS, where a full swipe across the pad is 1,000–1,800 pt and a rela
 | `hintTiltDegrees` | `3` | Tilt toward the thumb at a full step |
 | `hintScale` | `1.02` | Lift of the card at a full step; `1` disables it |
 | `hintHighlightParallax` | `1.25` | How much further than the card the highlight leans; `1` moves them as one |
-| `hintLight` | `0.22` | Peak opacity of the light that slides toward the thumb across the card; `0` disables it |
+| `hintLight` | `0.10` | Peak opacity of the light that slides toward the thumb across the card; `0` disables it |
 | `hintLightColor` | `Color.White` | Colour of that light |
 | `hintReleaseSpec` | `spring(0.55, 450)` | How the lean springs back when the thumb lifts |
 

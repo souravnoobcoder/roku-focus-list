@@ -53,7 +53,7 @@ data class RokuTouchpadConfig(
     val hintTiltDegrees: Float = 3f,
     val hintScale: Float = 1.02f,
     val hintHighlightParallax: Float = 1.25f,
-    val hintLight: Float = 0.22f,
+    val hintLight: Float = 0.10f,
     val hintLightColor: Color = Color.White,
     val hintReleaseSpec: AnimationSpec<Offset> = spring(dampingRatio = 0.55f, stiffness = 450f)
 )
