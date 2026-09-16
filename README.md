@@ -747,8 +747,8 @@ What every component then does, with no per-screen code:
 - **A fast thumb covers more ground** through a smooth velocity gain (×1 up to 2,500 pt/s, ×2 from
   12,000), so a hard swipe crosses about twice the items of a careful one.
 - **Small movement is never lost.** Travel short of a full step plays a soft light across the
-  focused card toward the thumb, brightening with pull, while the card leans a little (6 dp, a 3°
-  tilt, a 2 % lift; the highlight travels slightly further for depth) and springs back with a
+  focused card toward the thumb, brightening with pull, while the card gives a small wiggle (4 dp, a 2°
+  tilt, a 1 % lift; the highlight travels slightly further for depth) and springs back with a
   bounce when the thumb lifts. This is the focus-movement hint that tells the user a small swipe
   was felt. The light is blended onto the card's own pixels, so rounded or odd-shaped cards keep
   their corners. At the end of a row the lean pins at full pull, pushing further is dropped, and
@@ -767,10 +767,10 @@ points on tvOS, where a full swipe across the pad is 1,000–1,800 pt and a rela
 | `axisLock` | `16` | Travel before a contact commits to an axis and can move; below it the card only leans |
 | `gainStartVelocity` / `gainMaxVelocity` | `2500` / `12000` | Thumb speeds between which travel counts ×1 → `maxGain`, smoothly |
 | `maxGain` | `2` | Travel multiplier for a fast thumb |
-| `hintTravel` | `6.dp` | Lean of the focused card at a full step of pending travel (square-root curve) |
-| `hintTiltDegrees` | `3` | Tilt toward the thumb at a full step |
-| `hintScale` | `1.02` | Lift of the card at a full step; `1` disables it |
-| `hintHighlightParallax` | `1.25` | How much further than the card the highlight leans; `1` moves them as one |
+| `hintTravel` | `4.dp` | Lean of the focused card at a full step of pending travel (square-root curve) |
+| `hintTiltDegrees` | `2` | Tilt toward the thumb at a full step |
+| `hintScale` | `1.012` | Lift of the card at a full step; `1` disables it |
+| `hintHighlightParallax` | `1.2` | How much further than the card the highlight leans; `1` moves them as one |
 | `hintLight` | `0.10` | Peak opacity of the light that slides toward the thumb across the card; `0` disables it |
 | `hintLightColor` | `Color.White` | Colour of that light |
 | `hintReleaseSpec` | `spring(0.55, 450)` | How the lean springs back when the thumb lifts |
