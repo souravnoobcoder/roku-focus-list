@@ -10,8 +10,14 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
@@ -75,7 +81,9 @@ internal class RokuTouchLeanStyle(
     val travelPx: Float,
     val tiltDegrees: Float,
     val scale: Float,
-    val highlightParallax: Float
+    val highlightParallax: Float,
+    val lightAlpha: Float,
+    val lightColor: Color
 )
 
 @Composable
@@ -88,7 +96,9 @@ internal fun rememberRokuTouchLeanStyle(touchpad: RokuTouchpad?): RokuTouchLeanS
             travelPx = with(density) { config.hintTravel.toPx() },
             tiltDegrees = config.hintTiltDegrees,
             scale = config.hintScale,
-            highlightParallax = config.hintHighlightParallax
+            highlightParallax = config.hintHighlightParallax,
+            lightAlpha = config.hintLight.coerceIn(0f, 1f),
+            lightColor = config.hintLightColor
         )
     }
 }
@@ -112,9 +122,55 @@ internal fun GraphicsLayerScope.applyTouchLean(lean: Offset, style: RokuTouchLea
     scaleY = lift
 }
 
-/** The focused item's share of the hint: the card leans with parallax 1, the highlight further. */
-internal fun Modifier.rokuTouchLean(lean: State<Offset>, style: RokuTouchLeanStyle): Modifier =
-    graphicsLayer { applyTouchLean(lean.value, style, parallax = 1f) }
+/**
+ * The focused item's share of the hint: the card leans with parallax 1 (the highlight goes
+ * further), and a light plays across it. The light is blended `SrcAtop` inside the item's own
+ * layer, so it lands only on pixels the card painted — a rounded or odd-shaped card keeps its
+ * corners — which is why the layer composites offscreen while the light is enabled.
+ */
+internal fun Modifier.rokuTouchLean(lean: State<Offset>, style: RokuTouchLeanStyle): Modifier {
+    val lit = style.lightAlpha > 0f
+    val leaning = graphicsLayer {
+        if (lit) compositingStrategy = CompositingStrategy.Offscreen
+        applyTouchLean(lean.value, style, parallax = 1f)
+    }
+    return if (lit) {
+        leaning.drawWithContent {
+            drawContent()
+            drawTouchLight(lean.value, style)
+        }
+    } else {
+        leaning
+    }
+}
+
+/**
+ * A soft spot of light that slides toward the thumb and brightens with pull, gone at rest. The
+ * spot's centre travels [LightTravel] of the card's size from the middle at a full step, and its
+ * radius covers the card so the falloff reads as a sheen rather than a torch.
+ */
+private fun ContentDrawScope.drawTouchLight(lean: Offset, style: RokuTouchLeanStyle) {
+    val x = shapeLean(lean.x)
+    val y = shapeLean(lean.y)
+    val pull = max(abs(x), abs(y))
+    if (pull <= 0f) return
+    val center = Offset(
+        size.width * (0.5f + LightTravel * x),
+        size.height * (0.5f + LightTravel * y)
+    )
+    drawRect(
+        brush = Brush.radialGradient(
+            0f to style.lightColor.copy(alpha = style.lightAlpha * pull),
+            1f to style.lightColor.copy(alpha = 0f),
+            center = center,
+            radius = max(size.width, size.height) * LightRadius
+        ),
+        blendMode = BlendMode.SrcAtop
+    )
+}
+
+private const val LightTravel = 0.35f
+private const val LightRadius = 0.9f
 
 /**
  * A square root of the pending fraction: a fifth of a step already gives almost half the travel,

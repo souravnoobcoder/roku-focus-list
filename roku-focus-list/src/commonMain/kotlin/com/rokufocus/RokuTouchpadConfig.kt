@@ -3,6 +3,7 @@ package com.rokufocus
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -27,12 +28,17 @@ import androidx.compose.ui.unit.dp
  *   twice the cards of a careful one without ever coasting after lift-off.
  * @property maxGain Multiplier applied to travel at [gainMaxVelocity] and above.
  * @property hintTravel How far the focused card leans toward the thumb at a full step of pending
- *   travel. The lean follows a square-root curve, so a brush of the pad already reads.
+ *   travel. The lean follows a square-root curve, so a brush of the pad already reads. Kept
+ *   small on purpose: the light does most of the talking.
  * @property hintTiltDegrees How far the card tilts toward the thumb at a full step, around the
  *   axis perpendicular to the movement.
  * @property hintScale The card's scale at a full step of pull; 1 disables the lift.
  * @property hintHighlightParallax How much further than the card the highlight leans, so the two
  *   read as layers with depth between them. 1 moves them as one.
+ * @property hintLight Peak opacity of the light that plays across the focused card while the
+ *   thumb moves: a soft spot that slides toward the thumb and brightens with pull, drawn only
+ *   over the card's own pixels so any shape keeps its corners. 0 disables it.
+ * @property hintLightColor Colour of that light.
  * @property hintReleaseSpec How the lean returns to rest when the thumb lifts. The default
  *   overshoots once, so the card visibly springs back rather than fading.
  */
@@ -43,10 +49,12 @@ data class RokuTouchpadConfig(
     val gainStartVelocity: Float = 2500f,
     val gainMaxVelocity: Float = 12000f,
     val maxGain: Float = 2f,
-    val hintTravel: Dp = 14.dp,
-    val hintTiltDegrees: Float = 6f,
-    val hintScale: Float = 1.04f,
-    val hintHighlightParallax: Float = 1.35f,
+    val hintTravel: Dp = 6.dp,
+    val hintTiltDegrees: Float = 3f,
+    val hintScale: Float = 1.02f,
+    val hintHighlightParallax: Float = 1.25f,
+    val hintLight: Float = 0.22f,
+    val hintLightColor: Color = Color.White,
     val hintReleaseSpec: AnimationSpec<Offset> = spring(dampingRatio = 0.55f, stiffness = 450f)
 )
 

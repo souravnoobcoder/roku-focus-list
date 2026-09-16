@@ -87,21 +87,18 @@ private enum class Layout(val title: String) {
 }
 
 /**
- * Every layout in both focus modes; Play/Pause on the remote steps through them. The grid comes
- * Floating first because that is its default.
+ * Every layout in both focus modes; Play/Pause on the remote steps through them. All four
+ * Floating scenes come first — the walking highlight is what is under test — then the Static
+ * ones.
  */
 private data class Scene(val layout: Layout, val mode: RokuFocusMode) {
     val title: String get() = "${layout.title} · $mode"
 }
 
-private val Scenes: List<Scene> = Layout.entries.flatMap { layout ->
-    val modes = if (layout == Layout.Grid) {
-        listOf(RokuFocusMode.Floating, RokuFocusMode.Static)
-    } else {
-        listOf(RokuFocusMode.Static, RokuFocusMode.Floating)
+private val Scenes: List<Scene> =
+    listOf(RokuFocusMode.Floating, RokuFocusMode.Static).flatMap { mode ->
+        Layout.entries.map { Scene(it, mode) }
     }
-    modes.map { Scene(layout, it) }
-}
 
 /**
  * Apple TV sample: the library's four layouts, each in both focus modes, driven by the Siri Remote
