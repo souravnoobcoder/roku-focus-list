@@ -994,8 +994,8 @@ which is why no platform-specific source set is needed.
 | Module | What it is |
 |---|---|
 | `roku-focus-list/` | The library. All code in `src/commonMain/kotlin` except the Siri Remote recogniser in `src/tvosMain/kotlin`; tests in `src/commonTest/kotlin`. |
-| `app/` | Android TV demo app: 100 rows, 6 card types, 7 demo screens. Run on a TV emulator or device. |
-| `sample-tvos/` | Runnable Apple TV sample: the four layouts in both focus modes, driven by `RokuTouchpad` with the one-line tvOS wiring, plus an on-screen selection and frame-timing readout. Xcode project in `sample-tvos/tvosApp/`; build in Release for a fair read on smoothness. |
+| `app/` | Android TV demo app: 100 rows, 6 card types, 9 demo screens, browsing the Apple TV way (floating focus, spatial row entry) with a Static screen for comparison. Run on a TV emulator or device. |
+| `sample-tvos/` | Runnable Apple TV sample: the Android demo's mixed-size home screen plus the four layouts, each in both focus modes, driven by `RokuTouchpad` with the one-line tvOS wiring, plus an on-screen selection and frame-timing readout. Xcode project in `sample-tvos/tvosApp/`; build in Release for a fair read on smoothness. |
 | `consumer-kmp/` | Verification module — a KMP library whose `commonMain` uses `RokuLazyRow` / `RokuLazyColumn`. |
 | `verification/published-consumer/` | Standalone Gradle build that resolves the **published** artifact from `mavenLocal` in `commonMain`. |
 

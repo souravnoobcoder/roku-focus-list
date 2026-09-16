@@ -78,8 +78,9 @@ private val SampleConfig = RokuFocusConfig(
     focusEscape = RokuFocusEscape.None,
 )
 
-/** The four ways to put the library on screen. */
+/** The Android demo's home screen, then the four ways to put the library on screen. */
 private enum class Layout(val title: String) {
+    Demo("OTT demo · mixed card sizes"),
     ColumnDsl("RokuLazyColumn · row { } DSL"),
     ColumnState("RokuLazyColumn · state-based rows"),
     StandaloneRow("RokuLazyRow · standalone, hoisted state"),
@@ -152,6 +153,7 @@ fun SwipeSampleScreen(modifier: Modifier = Modifier) {
             // remembered states under a different focus mode.
             key(scene) {
                 when (scene.layout) {
+                    Layout.Demo -> DemoLayout(scene.mode, onSelected)
                     Layout.ColumnDsl -> ColumnDslLayout(scene.mode, onSelected)
                     Layout.ColumnState -> ColumnStateLayout(scene.mode, onSelected)
                     Layout.StandaloneRow -> StandaloneRowLayout(scene.mode, onSelected)
@@ -163,6 +165,44 @@ fun SwipeSampleScreen(modifier: Modifier = Modifier) {
 }
 
 private const val IdleReport = "Drag the remote, or use the D-pad · Play/Pause switches layout and focus mode"
+
+/**
+ * The Android demo's home screen: 36 rows cycling banners, wide cards, landscape cards and
+ * posters, every size declared, so a vertical move between rows of different card widths can be
+ * judged — and so both TVs show the same thing.
+ */
+@Composable
+private fun DemoLayout(mode: RokuFocusMode, onSelected: (Int, Int) -> Unit) {
+    val columnState = rememberRokuColumnState()
+    RequestFocusWhenReady(columnState) { columnState.requestFocus() }
+
+    RokuLazyColumn(
+        state = columnState,
+        config = SampleConfig,
+        contentPadding = PaddingValues(bottom = 48.dp),
+        rowSpacing = 8.dp,
+        focusHighlight = { isFocused -> SampleHighlight(isFocused) },
+        onItemSelected = onSelected,
+        verticalFocusMode = mode,
+    ) {
+        demoRows.forEach { row ->
+            row(
+                itemWidth = row.itemWidth,
+                itemHeight = row.itemHeight,
+                itemSpacing = row.itemSpacing,
+                contentPadding = RailPadding,
+                headerHeight = RowHeaderHeight,
+                key = row.title,
+                focusMode = mode,
+                header = { RowHeader(row.title) },
+            ) {
+                items(row.items, key = { it.id }, contentDescription = { it.name }) { item, isFocused ->
+                    DemoCard(row, item, isFocused)
+                }
+            }
+        }
+    }
+}
 
 /** The column DSL: sizes are measured from the first card and the header, nothing declared. */
 @Composable
