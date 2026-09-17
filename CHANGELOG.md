@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-09-17
+
+### Fixed
+
+- **A floating row or grid no longer scrolls its remembered card to the leading edge when a screen is reopened.** The window was contained against the viewport the state constructor starts with — one item — and a window of one has exactly one legal anchor: the selection. So any state created or restored on a non-zero index collapsed its anchor onto that index, and the rail then scrolled the card to its own leading edge as if it were `Static`. It ran on every path that reaches the state before the composable has measured anything: the constructor's own `init`, and the `updateItemCount` that `rememberRokuFocusListState` applies during composition, which is what destroyed the anchor a `Saver` had just restored. Containment now waits for the first viewport report, which always arrives in the same composition pass; a caller who passes a real `visibleCount` / `visibleRows` is still believed immediately. One consequence worth knowing: opening a floating row on a card outside the first window now brings it to the **last visible slot** — minimal containment, as documented — where it used to arrive at the leading edge.
+
+- **A restored list is laid out at its window instead of scrolling to it.** `RokuRowContent`, `RokuLazyColumn` and `RokuFocusGrid` seed their lazy state at the window their Roku state already holds, and land on their first scroll target rather than animating to it. Returning to a screen previously showed its rails sweeping into place from item 0; they now appear where they belong. The column keeps snapping until its viewport is real, because a target resolved against degenerate geometry is provisional.
+
+- **The column's highlight is placed when it appears, not flown in from the row that hid it.** A row with `showHighlight = false` — a hero drawing its own treatment — still moved the highlight's animation targets, so when the next row brought the highlight back it animated from that row's full-width, full-height geometry: a viewport-wide box sweeping down the screen and shrinking onto a card. Every feed with a hero showed it on the first press down, and no feed without one did. The animations are now keyed on whether the highlight is drawn, so they restart at the row they appear on.
+
+### Added
+
+- `RokuRestoredWindowTest`: the unmeasured-viewport collapse on both rails and grids, the restore ordering (`Saver` → `updateItemCount` → viewport), a deep anchor surviving it, minimal containment once measured, a viewport that genuinely fits one item, an explicitly-sized state being believed at construction, and `Static` being unaffected.
+
 ## [2.3.0] - 2026-09-16
 
 ### Added

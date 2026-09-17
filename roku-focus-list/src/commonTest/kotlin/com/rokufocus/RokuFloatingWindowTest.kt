@@ -215,17 +215,22 @@ class RokuFloatingWindowTest {
     fun rowSaverRoundTripsModeAndAnchor() {
         val s = RokuFocusListState(itemCount = 30, initialIndex = 12, focusMode = RokuFocusMode.Floating)
         s.visibleCount = 5
-        assertEquals(12, s.windowStart)
+        // Containment is minimal, so opening on card 12 brings it to the LAST visible slot. It
+        // used to land at the leading edge, because the constructor contained against the
+        // one-item placeholder viewport first and pinned the anchor on the selection — the
+        // collapse RokuRestoredWindowTest covers.
+        assertEquals(8, s.windowStart)
+        assertEquals(4, s.highlightSlot)
 
         val restored = roundTrip(RokuFocusListState.Saver, s)
         assertEquals(RokuFocusMode.Floating, restored.focusMode)
-        assertEquals(12, restored.windowAnchor)
+        assertEquals(s.windowAnchor, restored.windowAnchor)
         assertEquals(12, restored.requestedIndex)
 
         restored.updateItemCount(30)
         restored.visibleCount = 5
         assertEquals(12, restored.selectedIndex)
-        assertEquals(12, restored.windowStart)
+        assertEquals(s.windowStart, restored.windowStart, "the window comes back where it was")
     }
 
     @Test
