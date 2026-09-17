@@ -60,6 +60,9 @@ class RokuGridState(
      */
     private var visibleRowsMeasured = visibleRows > 1
 
+    /** Whether the composable has reported a viewport yet — see `RokuFocusListState`. */
+    internal val viewportMeasured: Boolean get() = visibleRowsMeasured
+
     /** Raw floating window anchor, in rows. Stored raw, clamped on read — see [windowStartRow]. */
     internal var windowAnchorRow by mutableIntStateOf(0)
 

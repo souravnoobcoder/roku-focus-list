@@ -2,6 +2,8 @@ package com.rokufocus
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * A floating window must never be contained against a viewport nobody has measured.
@@ -88,6 +90,39 @@ class RokuRestoredWindowTest {
 
         assertEquals(4, row.windowStart, "one slot has exactly one legal window")
         assertEquals(0, row.highlightSlot)
+    }
+
+    // 🚨 The renderers guard their viewport write on inequality, so a viewport that measures to
+    // one — the same value the constructor starts with — is only ever reported if the state can
+    // tell them it has not been measured yet. Without that, a one-row grid froze: the selection
+    // walked while the highlight and the scroll stood still, and Enter opened a card that was not
+    // on screen.
+    @Test
+    fun aViewportIsUnmeasuredUntilReportedSoACallerKnowsToReportOne() {
+        val row = RokuFocusListState(
+            itemCount = 40,
+            initialIndex = 4,
+            focusMode = RokuFocusMode.Floating
+        )
+        assertFalse(row.viewportMeasured, "nothing has reported a viewport yet")
+
+        // What a renderer does on its first pass, having measured exactly one visible item.
+        if (!row.viewportMeasured || row.visibleCount != 1) row.visibleCount = 1
+
+        assertTrue(row.viewportMeasured, "the report landed even though the value matched")
+        assertEquals(4, row.windowStart, "so the window contains, instead of standing still")
+    }
+
+    @Test
+    fun aGridViewportIsUnmeasuredUntilReportedToo() {
+        val grid = RokuGridState(itemCount = 60, columns = 5, initialIndex = 20)
+        assertFalse(grid.viewportMeasured)
+
+        if (!grid.viewportMeasured || grid.visibleRows != 1) grid.visibleRows = 1
+
+        assertTrue(grid.viewportMeasured)
+        assertEquals(4, grid.windowStartRow, "row 4 is pulled under the single visible row")
+        assertEquals(0, grid.highlightRowSlot)
     }
 
     @Test

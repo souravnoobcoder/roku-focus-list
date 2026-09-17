@@ -131,7 +131,12 @@ internal fun RokuFocusGridImpl(
         val visibleRows = if (rowPitch > 0.dp) {
             ((availableHeight + rowSpacing) / rowPitch).toInt().coerceAtLeast(1)
         } else 1
-        if (state.visibleRows != visibleRows) state.visibleRows = visibleRows
+        // Written on the first pass even when it matches what the state holds: one row is both
+        // the constructor's placeholder and a real measurement, and the state cannot contain its
+        // window until it knows which it has. See RokuFocusListState.viewportMeasured.
+        if (!state.viewportMeasured || state.visibleRows != visibleRows) {
+            state.visibleRows = visibleRows
+        }
 
         val gridState = rememberLazyGridState()
         val scrollAnimator = remember(gridState) { RokuScrollAnimator() }

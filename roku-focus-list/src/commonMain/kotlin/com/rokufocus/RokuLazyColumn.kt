@@ -197,7 +197,11 @@ internal fun RokuLazyColumnImpl(
                     val visible = if (denominator > 0.dp) {
                         ((available + row.config.itemSpacing) / denominator).toInt().coerceAtLeast(1)
                     } else 1
-                    if (row.config.state.visibleCount != visible) row.config.state.visibleCount = visible
+                    // First pass always reports — see RokuFocusListState.viewportMeasured.
+                    val rowState = row.config.state
+                    if (!rowState.viewportMeasured || rowState.visibleCount != visible) {
+                        rowState.visibleCount = visible
+                    }
                 }
             }
         }

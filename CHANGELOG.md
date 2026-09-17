@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-09-17
+
+### Fixed
+
+- **A list whose viewport measures to exactly one item froze: the selection walked while the highlight and the scroll stood still.** 2.3.1 made window containment wait for the composable's first viewport report, but all three renderers write that report only when the value differs from what the state holds — and one item is both the constructor's placeholder and a legitimate measurement. So a one-item viewport was never reported, the state never learned it had been measured, and its floating window was never contained again. On a grid tall enough for a single row that meant the ring sat on the first cell forever while `selectedIndex` advanced underneath it, and Enter opened a card that was not on screen. The renderers now always write their first report, through the new internal `viewportMeasured`.
+
 ## [2.3.1] - 2026-09-17
 
 ### Fixed
