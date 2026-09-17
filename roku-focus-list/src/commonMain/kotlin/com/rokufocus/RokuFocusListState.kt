@@ -69,6 +69,17 @@ class RokuFocusListState(
     private var visibleCountMeasured = visibleCount > 1
 
     /**
+     * Whether the composable has reported a viewport yet.
+     *
+     * 🚨 A renderer must write [visibleCount] when this is false even if the value it measured
+     * equals what the state already holds. A viewport of one item is both the placeholder and a
+     * legitimate measurement, so a caller that guards purely on inequality never reports it, the
+     * state never learns it was measured, and the floating window is never contained again — the
+     * selection then walks while the highlight and the scroll stand still.
+     */
+    internal val viewportMeasured: Boolean get() = visibleCountMeasured
+
+    /**
      * Raw [RokuFocusMode.Floating] window anchor. Stored raw and bounds-clamped on read, like
      * [requestedIndex]: a window pushed out of range by a shrinking list comes back where it was
      * once the items return, because the clamp is never written back.

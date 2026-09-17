@@ -111,7 +111,10 @@ internal fun RokuLazyRowImpl(
         val computedVisibleCount = if (denominator > 0.dp) {
             ((availableWidth + itemSpacing) / denominator).toInt().coerceAtLeast(1)
         } else 1
-        if (state.visibleCount != computedVisibleCount) state.visibleCount = computedVisibleCount
+        // First pass always reports — see RokuFocusListState.viewportMeasured.
+        if (!state.viewportMeasured || state.visibleCount != computedVisibleCount) {
+            state.visibleCount = computedVisibleCount
+        }
 
         // Highlight X position using shared utility (handles scroll clamping at edges)
         val targetHighlightX = computeHighlightOffsetPx(
