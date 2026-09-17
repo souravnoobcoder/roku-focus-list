@@ -52,6 +52,14 @@ class RokuGridState(
     private var _columns by mutableIntStateOf(columns.coerceAtLeast(1))
     private var _visibleRows by mutableIntStateOf(visibleRows.coerceAtLeast(1))
 
+    /**
+     * Whether [visibleRows] is a measured viewport rather than the constructor's placeholder.
+     * Same rule, and the same defect, as `RokuFocusListState.visibleCountMeasured`: containing a
+     * floating window against an unmeasured viewport of one row collapses the anchor onto the
+     * selected row, and a grid restored on row 4 then scrolls row 4 to the top.
+     */
+    private var visibleRowsMeasured = visibleRows > 1
+
     /** Raw floating window anchor, in rows. Stored raw, clamped on read — see [windowStartRow]. */
     internal var windowAnchorRow by mutableIntStateOf(0)
 
@@ -86,7 +94,10 @@ class RokuGridState(
         get() = _visibleRows
         internal set(value) {
             val rows = value.coerceAtLeast(1)
-            if (_visibleRows == rows) return
+            // The first report always contains, even when it equals the placeholder.
+            val firstReport = !visibleRowsMeasured
+            visibleRowsMeasured = true
+            if (_visibleRows == rows && !firstReport) return
             _visibleRows = rows
             containWindow()
         }
@@ -244,6 +255,7 @@ class RokuGridState(
      */
     private fun containWindow() {
         if (focusMode != RokuFocusMode.Floating) return
+        if (!visibleRowsMeasured) return
         val row = selectedRow
         val start = windowStartRow
         when {

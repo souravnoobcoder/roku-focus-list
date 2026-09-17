@@ -13,6 +13,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -60,7 +61,15 @@ internal fun RokuRowContent(
     // composition would keep answering for the row's original position.
     val currentRowFocused = rememberUpdatedState(rowFocused)
 
-    val lazyListState = rememberLazyListState()
+    // Laid out at the window the state already holds, so a row that opens on a remembered card —
+    // a screen returned to — is drawn in position from its first frame instead of composing at
+    // item 0 and scrolling there. Read without observation: subscribing this composable to
+    // `windowStart` would recompose it on every scroll, which is exactly what the snapshotFlow
+    // below exists to avoid.
+    val initialWindow = remember {
+        Snapshot.withoutReadObservation { state.windowStart }
+    }
+    val lazyListState = rememberLazyListState(initialFirstVisibleItemIndex = initialWindow)
     val scrollAnimator = remember(lazyListState) { RokuScrollAnimator() }
 
     val density = LocalDensity.current
@@ -75,7 +84,21 @@ internal fun RokuRowContent(
     // time. Everything here reads layoutInfo, never snapshot state, so no composition subscribes.
     LaunchedEffect(state, lazyListState, itemWidthPx, itemSpacingPx) {
         val stepPx = itemWidthPx + itemSpacingPx
+        // The first window this pass sees is where the row already is — or, if a restored
+        // `LazyListState` disagrees with a restored anchor, where it belongs. Landed on, never
+        // travelled to: animating it is a rail sweeping across the screen on arrival.
+        var landed = false
         snapshotFlow { state.windowStart }.collectLatest { windowStart ->
+            if (!landed) {
+                landed = true
+                if (lazyListState.firstVisibleItemIndex != windowStart ||
+                    lazyListState.firstVisibleItemScrollOffset != 0
+                ) {
+                    scrollAnimator.reset()
+                    lazyListState.scrollToItem(windowStart)
+                }
+                return@collectLatest
+            }
             val info = lazyListState.layoutInfo
             val viewportPx = info.viewportSize.width.toFloat()
             val currentPx = lazyListState.absoluteOffsetPx(stepPx)

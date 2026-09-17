@@ -23,7 +23,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -104,7 +106,18 @@ internal fun RokuLazyColumnImpl(
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val touchpad = LocalRokuTouchpad.current
-    val lazyColumnState = rememberLazyListState()
+    // Laid out at the row the state already points to — see RokuRowContent — so a restored column
+    // shows its remembered rows from the first frame. Floating anchors the window, Static scrolls
+    // the selected row itself; both are the row the scroll effect below resolves.
+    val initialColumnRow = remember {
+        Snapshot.withoutReadObservation {
+            when (verticalFocusMode) {
+                RokuFocusMode.Floating -> state.windowAnchorRow
+                RokuFocusMode.Static -> state.selectedRowIndex
+            }.coerceIn(0, rows.lastIndex)
+        }
+    }
+    val lazyColumnState = rememberLazyListState(initialFirstVisibleItemIndex = initialColumnRow)
 
     val selectedRowIndex = state.selectedRowIndex
     val activeRow = rows[selectedRowIndex]
@@ -306,7 +319,18 @@ internal fun RokuLazyColumnImpl(
         // A new key cancels the in-flight animation; the animator carries its velocity into the
         // next one so successive row moves read as one scroll, not a restart per row.
         val scrollAnimator = remember(lazyColumnState) { RokuScrollAnimator() }
+        // Snapped, not animated, until the column has a measured viewport to resolve its scroll
+        // target against. Everything before that is arrival — a restored screen must appear at its
+        // rows, not scroll down to them — and the target is provisional while the geometry is
+        // still degenerate.
+        val landing = remember(lazyColumnState) { ColumnLanding() }
         LaunchedEffect(scrollTargetRow, geometry) {
+            if (!landing.done) {
+                if (geometry.viewportHeightPx > 0f) landing.done = true
+                scrollAnimator.reset()
+                lazyColumnState.scrollToItem(scrollTargetRow)
+                return@LaunchedEffect
+            }
             if (state.keyRepeat.consecutivePresses > config.keyRepeatAccelAfter) {
                 scrollAnimator.reset()
                 lazyColumnState.scrollToItem(scrollTargetRow)
@@ -349,13 +373,28 @@ internal fun RokuLazyColumnImpl(
         }
 
         // ── Animate highlight: full spec for position, fast tween for size ──
+        //
+        // 🚨 Keyed on whether the highlight is drawn at all. A row that hides it — a hero drawing
+        // its own treatment, through `showHighlight = false` — still moves these targets, so while
+        // nothing is on screen they sit on that row's full-width, full-height geometry. Letting
+        // them run when the next row brings the highlight back is a viewport-wide box sweeping
+        // down the screen and shrinking onto a card: the glitch every feed with a hero showed on
+        // the first press down, and no feed without one did. Re-keying restarts them at the row
+        // they appear on, so the highlight is *placed* when it appears and animates only between
+        // rows that show it.
+        val highlightShown = activeRow.showHighlight && activeRow.isSelectable
         val spec = config.highlightAnimationSpec
-        val animatedX by animateFloatAsState(targetHighlightX, spec, label = "hl_x")
-        val animatedY by animateFloatAsState(targetHighlightY, config.verticalAnimationSpec ?: spec, label = "hl_y")
-        val animatedWidth by animateFloatAsState(targetHighlightWidth, HighlightSizeSpec, label = "hl_w")
-        val animatedHeight by animateFloatAsState(
-            geometry.contentHeightPx[selectedRowIndex], HighlightSizeSpec, label = "hl_h"
-        )
+        val verticalSpec = config.verticalAnimationSpec ?: spec
+        val highlight = key(highlightShown) {
+            HighlightFrame(
+                x = animateFloatAsState(targetHighlightX, spec, label = "hl_x"),
+                y = animateFloatAsState(targetHighlightY, verticalSpec, label = "hl_y"),
+                width = animateFloatAsState(targetHighlightWidth, HighlightSizeSpec, label = "hl_w"),
+                height = animateFloatAsState(
+                    geometry.contentHeightPx[selectedRowIndex], HighlightSizeSpec, label = "hl_h"
+                ),
+            )
+        }
 
         // Touchpad: bound while the column holds focus; horizontal swipes go to the active rail (or
         // to a custom row's onKeyEvent), vertical ones step rows, and the focused card and the
@@ -443,19 +482,19 @@ internal fun RokuLazyColumnImpl(
             }
 
             // Single global highlight overlay
-            if (activeRow.showHighlight && activeRow.isSelectable) {
+            if (highlightShown) {
                 Box(
                     modifier = Modifier
                         .graphicsLayer {
-                            translationX = animatedX
-                            translationY = animatedY
+                            translationX = highlight.x.value
+                            translationY = highlight.y.value
                             if (touchLean != null && leanStyle != null) {
                                 applyTouchLean(touchLean.value, leanStyle, leanStyle.highlightParallax)
                             }
                         }
                         .layout { measurable, _ ->
-                            val w = animatedWidth.roundToInt().coerceAtLeast(0)
-                            val h = animatedHeight.roundToInt().coerceAtLeast(0)
+                            val w = highlight.width.value.roundToInt().coerceAtLeast(0)
+                            val h = highlight.height.value.roundToInt().coerceAtLeast(0)
                             val placeable = measurable.measure(Constraints.fixed(w, h))
                             layout(w, h) { placeable.place(0, 0) }
                         }
@@ -473,6 +512,22 @@ internal fun RokuLazyColumnImpl(
 
 /** `CollectionInfo` treats a negative count as "unknown", which is right for ragged rails. */
 private const val UnknownColumnCount = -1
+
+/** Whether the column has landed on a scroll target resolved against a real viewport. */
+private class ColumnLanding {
+    var done = false
+}
+
+/**
+ * The highlight's animated geometry, held as `State` so the overlay reads it at draw and layout
+ * time rather than in composition — a move costs a redraw, not a recomposition of the column.
+ */
+private class HighlightFrame(
+    val x: State<Float>,
+    val y: State<Float>,
+    val width: State<Float>,
+    val height: State<Float>
+)
 
 /**
  * A column of rails. Horizontal moves go through the active rail with the same edge policy and

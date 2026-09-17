@@ -52,6 +52,23 @@ class RokuFocusListState(
     private var _visibleCount by mutableIntStateOf(visibleCount)
 
     /**
+     * Whether [visibleCount] is a measured viewport rather than the placeholder the constructor
+     * starts with.
+     *
+     * 🚨 The floating window must not be contained against a viewport nobody has measured. A
+     * window of one has exactly one legal anchor — the selection — so containing against the
+     * default collapses the anchor onto it, and the row then scrolls that item to its leading
+     * edge as if it were Static. It happened on every row that opened on a non-zero index: the
+     * constructor contains, and `rememberRokuFocusListState` calls [updateItemCount] during
+     * composition, both before the composable has measured anything. A screen returned to would
+     * restore its card and then scroll it to the start of the row.
+     *
+     * A caller who passes a real [visibleCount] is taken at their word; everyone else waits for
+     * the composable's first report, which always arrives in the same composition pass.
+     */
+    private var visibleCountMeasured = visibleCount > 1
+
+    /**
      * Raw [RokuFocusMode.Floating] window anchor. Stored raw and bounds-clamped on read, like
      * [requestedIndex]: a window pushed out of range by a shrinking list comes back where it was
      * once the items return, because the clamp is never written back.
@@ -79,7 +96,11 @@ class RokuFocusListState(
     var visibleCount: Int
         get() = _visibleCount
         internal set(value) {
-            if (_visibleCount == value) return
+            // The first report always contains, even when it equals the placeholder: a viewport
+            // that genuinely fits one item still has to pull the anchor onto the selection.
+            val firstReport = !visibleCountMeasured
+            visibleCountMeasured = true
+            if (_visibleCount == value && !firstReport) return
             _visibleCount = value
             containWindow()
         }
@@ -203,9 +224,12 @@ class RokuFocusListState(
      * The callers guard on value equality first: [updateItemCount] and the [visibleCount] setter
      * run from composition on every pass, and the selection reads here would otherwise subscribe
      * that composition scope to every future selection change.
+     *
+     * Does nothing until the viewport has been measured — see [visibleCountMeasured].
      */
     private fun containWindow() {
         if (focusMode != RokuFocusMode.Floating) return
+        if (!visibleCountMeasured) return
         val selected = selectedIndex
         val start = windowStart
         when {
