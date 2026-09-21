@@ -11,7 +11,8 @@ class RokuTouchpadTest {
 
     private class RecordingTarget(
         private val stepPx: Float = 300f,
-        private val canMove: (steps: Int) -> Boolean = { true }
+        private val canMove: (steps: Int) -> Boolean = { true },
+        private val canMoveRows: (steps: Int) -> Boolean = canMove
     ) : RokuTouchTarget {
         val itemMoves = mutableListOf<Int>()
         val rowMoves = mutableListOf<Int>()
@@ -25,7 +26,12 @@ class RokuTouchpadTest {
 
         override fun moveRows(steps: Int): Boolean {
             rowMoves += steps
-            return canMove(steps)
+            return canMoveRows(steps)
+        }
+
+        override fun canMove(orientation: Orientation, forward: Boolean): Boolean {
+            val steps = if (forward) 1 else -1
+            return if (orientation == Orientation.Horizontal) canMove(steps) else canMoveRows(steps)
         }
     }
 
@@ -217,22 +223,95 @@ class RokuTouchpadTest {
     }
 
     @Test
-    fun theKeyGuardArmsOnlyForAContactThatCommittedToAnAxis() {
+    fun theKeyGuardOwnsTheKeyForASwipeItApplied() {
         val pad = touchpad(RecordingTarget(stepPx = 300f))
         val now = RokuClock.uptimeMillis()
-        assertFalse(pad.swallowsKey(now), "a fresh touchpad has swallowed nothing")
-
-        pad.panBegan()
-        pad.drag(dx = 8f, dy = 0f)
-        pad.panEnded()
-        assertFalse(pad.swallowsKey(RokuClock.uptimeMillis()), "a brush below the axis lock never produces a fork key")
+        assertFalse(pad.swallowsKey(Orientation.Horizontal, forward = true, now), "a fresh touchpad has swallowed nothing")
 
         pad.panBegan()
         pad.drag(dx = 310f, dy = 0f)
         pad.panEnded()
         val after = RokuClock.uptimeMillis()
-        assertTrue(pad.swallowsKey(after), "a swipe's leaked key arrives within the window")
-        assertFalse(pad.swallowsKey(after + KeyLeakWindowMs + 1), "and a real press later is let through")
+        assertTrue(
+            pad.swallowsKey(Orientation.Horizontal, forward = true, after),
+            "the fork's key for a swipe that already moved the selection is its echo"
+        )
+        assertFalse(
+            pad.swallowsKey(Orientation.Horizontal, forward = true, after + KeyLeakWindowMs + 1),
+            "and a real press later is let through"
+        )
+    }
+
+    @Test
+    fun theKeyGuardOwnsTheKeyWhileAContactCanStillMove() {
+        // The fork may dispatch its key mid-contact, before the thumb has travelled a full step.
+        val pad = touchpad(RecordingTarget(stepPx = 300f))
+        pad.panBegan()
+        pad.drag(dx = 40f, dy = 0f)
+        assertTrue(
+            pad.swallowsKey(Orientation.Horizontal, forward = true, RokuClock.uptimeMillis()),
+            "the selection can move right under the thumb, so the key is the touchpad's"
+        )
+        pad.panEnded()
+    }
+
+    @Test
+    fun theKeyGuardLetsTheKeyThroughAtAnOpenEdge() {
+        // Nothing to the left: the swipe pins, and the fork's Left key has to reach the key
+        // handler so focusEscape can let focus leave the list.
+        val pad = touchpad(RecordingTarget(stepPx = 300f, canMove = { steps -> steps > 0 }))
+        pad.panBegan()
+        pad.drag(dx = -310f, dy = 0f)
+        pad.panEnded()
+        val now = RokuClock.uptimeMillis()
+        assertFalse(pad.swallowsKey(Orientation.Horizontal, forward = false, now), "Left escapes the row")
+        assertTrue(pad.swallowsKey(Orientation.Horizontal, forward = true, now), "Right is still the touchpad's")
+    }
+
+    @Test
+    fun theKeyGuardLetsAKeyAcrossTheRowsAxisThrough() {
+        // A lone rail cannot move vertically, so a vertical flick's key is how focus leaves it.
+        val pad = touchpad(RecordingTarget(stepPx = 300f, canMoveRows = { false }))
+        pad.panBegan()
+        pad.drag(dx = 0f, dy = 310f)
+        pad.panEnded()
+        assertFalse(
+            pad.swallowsKey(Orientation.Vertical, forward = true, RokuClock.uptimeMillis()),
+            "Down leaves the rail"
+        )
+    }
+
+    @Test
+    fun theKeyGuardIsInertWithoutAFocusedComponent() {
+        val pad = RokuTouchpad(plain)
+        pad.panBegan()
+        pad.drag(dx = 310f, dy = 0f)
+        pad.panEnded()
+        assertFalse(
+            pad.swallowsKey(Orientation.Horizontal, forward = true, RokuClock.uptimeMillis()),
+            "with nothing bound the key is the only thing that can move focus"
+        )
+    }
+
+    @Test
+    fun aStepFloorKeepsSmallItemsFromFlyingUnderTheThumb() {
+        // 40-unit keys: at the default fraction a key is 26 units of travel. With a 120-unit
+        // floor it takes 120, whatever the pitch, and a pitch of 0 still never moves.
+        val keys = RecordingTarget(stepPx = 40f)
+        val pad = touchpad(keys, RokuTouchpadConfig(itemStepFraction = 0.65f, maxGain = 1f, minItemStepUnits = 120f))
+        pad.panBegan()
+        pad.drag(dx = 100f, dy = 0f)
+        assertEquals(emptyList(), keys.itemMoves, "less than the floor leans, it does not move")
+        pad.drag(dx = 25f, dy = 0f)
+        assertEquals(listOf(1), keys.itemMoves, "the floor is one key")
+        pad.panEnded()
+
+        val rail = RecordingTarget(stepPx = 0f)
+        val railPad = touchpad(rail, RokuTouchpadConfig(minRowStepUnits = 120f, maxGain = 1f))
+        railPad.panBegan()
+        railPad.drag(dx = 0f, dy = 400f)
+        assertEquals(emptyList(), rail.rowMoves, "no pitch means no step, floor or not")
+        railPad.panEnded()
     }
 
     @Test

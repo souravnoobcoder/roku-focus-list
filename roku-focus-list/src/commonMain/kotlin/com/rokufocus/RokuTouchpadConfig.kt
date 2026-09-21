@@ -20,6 +20,11 @@ import androidx.compose.ui.unit.dp
  *   a full pad swipe walks four to six cards before acceleration and a half-pad swipe still moves
  *   one.
  * @property rowStepFraction Travel per row while dragging up or down, in row pitches.
+ * @property minItemStepUnits Least travel per item, in the host's units, whatever the item
+ *   pitch. A step that is a fraction of the pitch makes small items — keyboard keys, chips —
+ *   fly under the thumb while posters feel right; a floor gives every list the same lower
+ *   bound on how far the thumb has to travel to move once. 0 keeps the pitch fraction alone.
+ * @property minRowStepUnits The vertical counterpart of [minItemStepUnits].
  * @property axisLock Travel before a contact commits to an axis and can move the selection. Below
  *   it the thumb only leans the card, so a click that rolls a little never moves focus.
  * @property gainStartVelocity Thumb speed up to which travel counts once.
@@ -45,6 +50,8 @@ import androidx.compose.ui.unit.dp
 data class RokuTouchpadConfig(
     val itemStepFraction: Float = 0.65f,
     val rowStepFraction: Float = 1f,
+    val minItemStepUnits: Float = 0f,
+    val minRowStepUnits: Float = 0f,
     val axisLock: Float = 16f,
     val gainStartVelocity: Float = 2500f,
     val gainMaxVelocity: Float = 12000f,

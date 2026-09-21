@@ -290,4 +290,13 @@ private class GridTouchTarget(
         }, onBoundaryHit = onBoundaryHit)
         return moved
     }
+
+    override fun canMove(orientation: Orientation, forward: Boolean): Boolean {
+        val steps = if (forward) 1 else -1
+        return if (orientation == Orientation.Horizontal) {
+            state.canMoveColumnSteps(steps, config.wrapAround)
+        } else {
+            state.canMoveRowSteps(steps, config.wrapAround)
+        }
+    }
 }

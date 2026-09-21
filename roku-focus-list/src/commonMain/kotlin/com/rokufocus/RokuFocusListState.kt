@@ -205,6 +205,14 @@ class RokuFocusListState(
         return abs(target - current)
     }
 
+    /** Whether [moveSteps] with the same arguments would change the selection, without moving it. */
+    internal fun canMoveSteps(steps: Int, wrapAround: Boolean): Boolean {
+        if (steps == 0 || _itemCount == 0) return false
+        if (wrapAround && _itemCount > 1) return true
+        val current = selectedIndex
+        return (current + steps).coerceIn(0, _itemCount - 1) != current
+    }
+
     /** Selects [index], remembering it as the request even when the row is currently shorter. */
     fun scrollTo(index: Int) {
         _requestedIndex = index.coerceAtLeast(0)

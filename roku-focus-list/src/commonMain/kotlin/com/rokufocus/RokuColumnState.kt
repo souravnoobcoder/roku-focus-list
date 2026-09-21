@@ -160,6 +160,20 @@ class RokuColumnState(initialRowIndex: Int = 0) {
         return activeRowState?.moveBy(steps, wrapAround) ?: false
     }
 
+    /** Whether [moveRowSteps] with the same arguments would change the selection, without moving it. */
+    internal fun canMoveRowSteps(steps: Int, wrapAround: Boolean): Boolean {
+        if (steps == 0 || _rowCount == 0) return false
+        val direction = if (steps > 0) 1 else -1
+        if (nextSelectableRow(_rowCount, selectedRowIndex, direction, rowSelectable) >= 0) return true
+        if (!wrapAround) return false
+        val wrapTarget = nearestSelectableRow(
+            _rowCount,
+            if (direction > 0) 0 else _rowCount - 1,
+            rowSelectable
+        )
+        return wrapTarget >= 0 && wrapTarget != selectedRowIndex
+    }
+
     /**
      * Shared core of [moveRowsBy], returning how many selectable rows the selection actually
      * covered so a caller can tell a fully-consumed move from a clipped one.

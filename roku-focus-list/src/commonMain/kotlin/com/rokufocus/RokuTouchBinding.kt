@@ -38,6 +38,15 @@ internal interface RokuTouchTarget {
     fun stepPx(orientation: Orientation): Float
     fun moveItems(steps: Int): Boolean
     fun moveRows(steps: Int): Boolean
+
+    /**
+     * Whether one step along [orientation] toward [forward] would change the selection — without
+     * taking it. This is how the touchpad decides whether a direction key from the platform is
+     * its own gesture echoed back (the selection can, or did, move that way: the touchpad owns
+     * it) or a move it cannot make (an open edge, the wrong axis): then the key has to reach the
+     * key handler, whose `focusEscape` policy lets focus leave the list.
+     */
+    fun canMove(orientation: Orientation, forward: Boolean): Boolean
 }
 
 /** Routes [touchpad] to [target] for as long as the component holds focus. */
@@ -179,18 +188,23 @@ private const val LightRadius = 0.9f
 private fun shapeLean(fraction: Float): Float = sign(fraction) * sqrt(abs(fraction))
 
 /**
- * Drops the direction key the Compose tvOS fork dispatches at lift-off for a swipe this touchpad
- * has already applied. Sits before the key handler in the chain so the handler never sees it.
- * Without a touchpad the modifier is a no-op.
+ * Drops the direction key the Compose tvOS fork dispatches for a swipe this touchpad owns —
+ * one it already applied, or one it can still apply along that axis. A key the touchpad cannot
+ * act on (the list is at an open edge, or the key runs across a row's axis) is left alone so it
+ * reaches the key handler and `focusEscape` can let focus leave. Sits before the key handler in
+ * the chain. Without a touchpad the modifier is a no-op.
  */
 internal fun Modifier.rokuTouchpadKeyGuard(touchpad: RokuTouchpad?): Modifier =
     if (touchpad == null) {
         this
     } else {
         onPreviewKeyEvent { event ->
-            isDirectionKey(event.key) && touchpad.swallowsKey(RokuClock.uptimeMillis())
+            val orientation = when (event.key) {
+                Key.DirectionLeft, Key.DirectionRight -> Orientation.Horizontal
+                Key.DirectionUp, Key.DirectionDown -> Orientation.Vertical
+                else -> return@onPreviewKeyEvent false
+            }
+            val forward = event.key == Key.DirectionRight || event.key == Key.DirectionDown
+            touchpad.swallowsKey(orientation, forward, RokuClock.uptimeMillis())
         }
     }
-
-private fun isDirectionKey(key: Key): Boolean =
-    key == Key.DirectionLeft || key == Key.DirectionRight || key == Key.DirectionUp || key == Key.DirectionDown

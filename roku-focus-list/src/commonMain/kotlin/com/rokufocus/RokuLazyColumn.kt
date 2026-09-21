@@ -594,6 +594,16 @@ private class ColumnTouchTarget(
         )
         return moved
     }
+
+    override fun canMove(orientation: Orientation, forward: Boolean): Boolean {
+        val steps = if (forward) 1 else -1
+        if (orientation == Orientation.Vertical) return state.canMoveRowSteps(steps, config.wrapAround)
+        val active = rows.getOrNull(state.selectedRowIndex)
+        // A custom row answers keys itself; whether it can move is its own business, so the
+        // touchpad keeps speaking for it as long as it listens at all.
+        if (active is RokuResolvedRow.Custom) return active.onKeyEvent != null
+        return state.activeRowState?.canMoveSteps(steps, config.wrapAround) ?: false
+    }
 }
 
 /** A custom row has no item pitch; a step is taken to be this fraction of the viewport. */

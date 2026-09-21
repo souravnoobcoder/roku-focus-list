@@ -202,4 +202,8 @@ private class RowTouchTarget(
     }
 
     override fun moveRows(steps: Int): Boolean = false
+
+    override fun canMove(orientation: Orientation, forward: Boolean): Boolean =
+        orientation == Orientation.Horizontal &&
+            state.canMoveSteps(if (forward) 1 else -1, config.wrapAround)
 }

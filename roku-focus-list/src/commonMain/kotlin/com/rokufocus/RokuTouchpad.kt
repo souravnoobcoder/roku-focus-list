@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Offset
 import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * A touchpad remote, as the library sees it: a stream of pan reports that the focused
@@ -63,7 +64,10 @@ class RokuTouchpad(val config: RokuTouchpadConfig = RokuTouchpadConfig()) {
     private var totalY = 0f
     private var travel = 0f
     private var edgePull = 0
-    private var lastSwipeUptime = 0L
+    /** When the selection last moved under the thumb; the platform's key for that swipe follows within [KeyLeakWindowMs]. */
+    private var lastMoveUptime = 0L
+    /** When the last contact lifted, so a key arriving just after it can still be judged against that contact. */
+    private var lastContactEndUptime = 0L
 
     /** A new contact. Clears anything left from the previous one. */
     fun panBegan() {
@@ -99,7 +103,6 @@ class RokuTouchpad(val config: RokuTouchpadConfig = RokuTouchpadConfig()) {
             current = locked
             delta = along(current, dx, dy)
         }
-        lastSwipeUptime = RokuClock.uptimeMillis()
         if (edgePull != 0 && delta * edgePull > 0f) {
             updateLean(leanFor(current, travel))
             return
@@ -125,10 +128,26 @@ class RokuTouchpad(val config: RokuTouchpadConfig = RokuTouchpadConfig()) {
     }
 
     /**
-     * Whether a direction key arriving at [now] is the Compose tvOS fork's own swipe-to-focus key
-     * for a contact this touchpad already applied, and must be dropped.
+     * Whether a direction key along [orientation] toward [forward], arriving at [now], belongs to
+     * this touchpad and must be dropped before it reaches a key handler.
+     *
+     * The Compose tvOS fork turns a flick on the pad into one such key — during the contact when
+     * it can read the pad's absolute position, at lift-off otherwise. Inside a focused list that
+     * key is the touchpad's own gesture echoed back, and letting it through would move the
+     * selection a second time. But it is also the only directional input a Siri Remote without
+     * ring buttons has, so it must be dropped **only where the touchpad speaks for it**: while a
+     * contact is live or has just lifted, and the selection either already moved under the thumb
+     * or still can move that way. At an open edge, across a row's axis, or with no list focused,
+     * the key is left alone — the key handler then applies `focusEscape`, and Compose moves
+     * focus onward exactly as it would for a D-pad press.
      */
-    internal fun swallowsKey(now: Long): Boolean = now - lastSwipeUptime <= KeyLeakWindowMs
+    internal fun swallowsKey(orientation: Orientation, forward: Boolean, now: Long): Boolean {
+        val bound = target ?: return false
+        val contactIsLive = isDragging || now - lastContactEndUptime <= KeyLeakWindowMs
+        if (!contactIsLive) return false
+        if (now - lastMoveUptime <= KeyLeakWindowMs) return true
+        return bound.canMove(orientation, forward)
+    }
 
     private fun stepFromTravel(current: Orientation) {
         val step = stepUnits(current)
@@ -137,6 +156,7 @@ class RokuTouchpad(val config: RokuTouchpadConfig = RokuTouchpadConfig()) {
         if (count == 0) return
         val direction = if (travel > 0f) 1 else -1
         if (move(current, direction * count)) {
+            lastMoveUptime = RokuClock.uptimeMillis()
             travel -= direction * count * step
         } else {
             edgePull = direction
@@ -152,8 +172,13 @@ class RokuTouchpad(val config: RokuTouchpadConfig = RokuTouchpadConfig()) {
     private fun stepUnits(current: Orientation): Float {
         val bound = target ?: return 0f
         val scale = if (pxPerUnit > 0f) pxPerUnit else 1f
-        val fraction = if (current == Orientation.Horizontal) config.itemStepFraction else config.rowStepFraction
-        return bound.stepPx(current) / scale * fraction
+        val horizontal = current == Orientation.Horizontal
+        val fraction = if (horizontal) config.itemStepFraction else config.rowStepFraction
+        val floor = if (horizontal) config.minItemStepUnits else config.minRowStepUnits
+        val fromPitch = bound.stepPx(current) / scale * fraction
+        // A component that cannot move along this axis reports no pitch; the floor must not
+        // turn that into a step, or a rail would start answering vertical travel.
+        return if (fromPitch <= 0f) 0f else max(fromPitch, floor)
     }
 
     private fun leanFor(current: Orientation, pendingTravel: Float): Offset {
@@ -171,7 +196,7 @@ class RokuTouchpad(val config: RokuTouchpadConfig = RokuTouchpadConfig()) {
     }
 
     private fun release() {
-        if (axis != null) lastSwipeUptime = RokuClock.uptimeMillis()
+        if (isDragging) lastContactEndUptime = RokuClock.uptimeMillis()
         axis = null
         isDragging = false
         updateLean(Offset.Zero)
@@ -191,7 +216,8 @@ class RokuTouchpad(val config: RokuTouchpadConfig = RokuTouchpadConfig()) {
 val LocalRokuTouchpad: ProvidableCompositionLocal<RokuTouchpad?> = staticCompositionLocalOf { null }
 
 /**
- * How long after touch-driven movement a direction key is taken to be the fork's leaked swipe
- * key. The fork dispatches it at lift-off, within a frame or two of the last pan report.
+ * How long after the selection moved under the thumb, or after the thumb lifted, a direction
+ * key is still judged against that contact. The fork dispatches its key mid-contact or within a
+ * frame or two of the lift-off.
  */
 internal const val KeyLeakWindowMs = 120L

@@ -167,6 +167,25 @@ class RokuGridState(
         return moveLinearSteps(steps, wrapAround) != 0
     }
 
+    /** Whether [moveColumnSteps] with the same arguments would change the selection, without moving it. */
+    internal fun canMoveColumnSteps(steps: Int, wrapAround: Boolean): Boolean {
+        if (steps == 0 || _itemCount == 0) return false
+        if (wrapAround) return _itemCount > 1
+        val current = selectedIndex
+        val first = selectedRow * _columns
+        val last = minOf(first + _columns - 1, _itemCount - 1)
+        return (current + steps).coerceIn(first, last) != current
+    }
+
+    /** Whether [moveRowSteps] with the same arguments would change the selection, without moving it. */
+    internal fun canMoveRowSteps(steps: Int, wrapAround: Boolean): Boolean {
+        if (steps == 0 || _itemCount == 0) return false
+        val lastRow = rowCount - 1
+        if (wrapAround && lastRow > 0) return true
+        val row = selectedRow
+        return (row + steps).coerceIn(0, lastRow) != row
+    }
+
     /** Shared core of the horizontal moves, returning how many cells were actually covered. */
     internal fun moveColumnSteps(steps: Int, wrapAround: Boolean): Int {
         if (steps == 0 || _itemCount == 0) return 0
