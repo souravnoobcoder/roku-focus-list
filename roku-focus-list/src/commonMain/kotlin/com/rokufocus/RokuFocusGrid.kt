@@ -70,7 +70,10 @@ internal fun RokuFocusGridImpl(
     itemContentDescription: ((index: Int) -> String?)? = null,
     itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
 ) {
-    if (state.itemCount == 0) return
+    // Captured with itemKey and itemContent and laid out from here, never read inside the grid's
+    // content — see RokuRowContent's itemCount.
+    val itemCount = state.itemCount
+    if (itemCount == 0) return
 
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
@@ -192,10 +195,10 @@ internal fun RokuFocusGridImpl(
         // Remembered so the grid receives the same content lambda on every selection
         // recomposition; selection is read back per cell through derivedStateOf.
         val cells: LazyGridScope.() -> Unit = remember(
-            state, columns, itemHeight, itemKey, itemContentDescription, itemContent, focusedItemModifier
+            state, itemCount, columns, itemHeight, itemKey, itemContentDescription, itemContent, focusedItemModifier
         ) {
             {
-                items(count = state.itemCount, key = itemKey ?: { it }) { index ->
+                items(count = itemCount, key = itemKey ?: { it }) { index ->
                     // Derived per cell for the same reason as RokuRowContent: a move recomposes
                     // the two cells whose value flipped, not every visible cell.
                     val isSelected by remember(index) { derivedStateOf { index == state.selectedIndex } }

@@ -86,8 +86,7 @@ internal fun RokuLazyColumnImpl(
     onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
-    rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null,
-    itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
+    rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null
 ) {
     // Published before anything reads selectedRowIndex, so the row it resolves to is always one
     // that exists and has something to select.
@@ -436,7 +435,7 @@ internal fun RokuLazyColumnImpl(
         // back inside each item's own scope via derivedStateOf, so a move recomposes exactly the
         // rows and items whose focus actually flipped.
         val rowItemContent: (@Composable LazyItemScope.(Int) -> Unit) =
-            remember(rows, state, rowHeader, itemContent, focusedItemModifier) {
+            remember(rows, state, rowHeader, focusedItemModifier) {
                 { rowIndex ->
                     val row = rows[rowIndex]
                     // Keyed on rowIndex: a keyed row that shifts position keeps its composition,
@@ -458,6 +457,7 @@ internal fun RokuLazyColumnImpl(
                         when (row) {
                             is RokuResolvedRow.Items -> RokuRowContent(
                                 state = row.config.state,
+                                itemCount = row.itemCount,
                                 contentPadding = row.config.contentPadding,
                                 itemWidth = row.config.itemWidth,
                                 itemSpacing = row.config.itemSpacing,
@@ -466,9 +466,7 @@ internal fun RokuLazyColumnImpl(
                                 itemContentDescription = row.config.itemContentDescription,
                                 rowFocused = { state.hasFocus && rowIndex == state.selectedRowIndex },
                                 focusedItemModifier = focusedItemModifier,
-                                itemContent = { itemIndex, isFocused ->
-                                    itemContent(rowIndex, itemIndex, isFocused)
-                                }
+                                itemContent = row.itemContent
                             )
 
                             is RokuResolvedRow.Custom -> Box(

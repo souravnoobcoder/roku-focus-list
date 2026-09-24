@@ -125,6 +125,7 @@ fun RokuLazyRow(
         val itemWidth = with(density) { measuredWidthPx.toDp() }
         RokuLazyRowImpl(
             state = rowState,
+            itemCount = scope.itemCount,
             modifier = modifier,
             config = config,
             contentPadding = contentPadding,
@@ -185,6 +186,7 @@ fun RokuLazyRow(
 ) {
     RokuLazyRowImpl(
         state = state,
+        itemCount = state.itemCount,
         modifier = modifier,
         config = config,
         contentPadding = contentPadding,
@@ -300,6 +302,8 @@ fun RokuLazyColumn(
                 RokuResolvedRow.Items(
                     key = spec.key,
                     header = spec.header,
+                    itemCount = spec.itemCount,
+                    itemContent = spec.itemContent,
                     config = RokuColumnRowConfig(
                         state = rowState,
                         itemWidth = itemWidth.takeOrElse { 0.dp },
@@ -348,11 +352,7 @@ fun RokuLazyColumn(
             onItemClicked = onItemClicked,
             onFocusEnter = onFocusEnter,
             onFocusExit = onFocusExit,
-            rowHeader = null,
-            itemContent = { rowIndex, itemIndex, isFocused ->
-                val spec = scope.rows.getOrNull(rowIndex)
-                if (spec is RokuLazyColumnScope.RowSpec.Items) spec.itemContent(itemIndex, isFocused)
-            }
+            rowHeader = null
         )
     }
 }
@@ -473,8 +473,21 @@ fun RokuLazyColumn(
     verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
     itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
 ) {
-    val resolvedRows = rows.map { rowConfig ->
-        RokuResolvedRow.Items(key = rowConfig.key, header = null, config = rowConfig)
+    // One wrapper per position, kept across passes: rebuilding them would hand every rail a new
+    // content lambda whenever any row's count changes, recomposing cards that did not.
+    val rowContents = remember(itemContent, rows.size) {
+        List<@Composable (Int, Boolean) -> Unit>(rows.size) { rowIndex ->
+            { itemIndex, isFocused -> itemContent(rowIndex, itemIndex, isFocused) }
+        }
+    }
+    val resolvedRows = rows.mapIndexed { rowIndex, rowConfig ->
+        RokuResolvedRow.Items(
+            key = rowConfig.key,
+            header = null,
+            config = rowConfig,
+            itemCount = rowConfig.state.itemCount,
+            itemContent = rowContents[rowIndex]
+        )
     }
 
     RokuLazyColumnImpl(
@@ -490,8 +503,7 @@ fun RokuLazyColumn(
         onItemClicked = onItemClicked,
         onFocusEnter = onFocusEnter,
         onFocusExit = onFocusExit,
-        rowHeader = rowHeader,
-        itemContent = itemContent
+        rowHeader = rowHeader
     )
 }
 
