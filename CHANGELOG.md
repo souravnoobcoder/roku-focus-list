@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A rail whose data changes no longer asks its item lambdas for an index their list does not have.** Every rail laid its items out from the row state's `itemCount`, which is snapshot state written during composition, while its `key` and item lambdas were the ones captured by the rail's last composition. The moment a new count landed, the LazyRow re-derived its items against the previous composition's lambdas, so a keyed rail that grew from one item to two called the old key lambda with index 1 and threw `IndexOutOfBoundsException: Index 1, Size 1`. It hit `RokuLazyColumn`'s `row { }` DSL, both `RokuLazyRow` overloads and `RokuFocusGrid`. The column's DSL had a second form of the same mismatch: it resolved a row's item lambda by *position* at call time, through a lambda Compose updates in place, so anything still composing against an older layout, such as a prefetched row resumed after the data changed, could be handed the newest list, which is how the same exception can surface from the item content lambda instead. Each rail now lays out the count captured with its key and item lambdas in one composition, and a column row carries its own item lambda instead of looking it up by position. `itemCount` on the states is unchanged and still drives navigation.
+
+### Added
+
+- `RokuItemCountConsistencyTest`: rails that grow, shrink, fill from empty and shift under an inserted row, on the column (both overloads), both `RokuLazyRow` overloads and the grid, with item lambdas that index an immutable list so a mismatch throws.
+
 ## [2.3.2] - 2026-09-17
 
 ### Fixed
