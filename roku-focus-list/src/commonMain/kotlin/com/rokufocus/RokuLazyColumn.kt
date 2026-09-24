@@ -1,9 +1,8 @@
 package com.rokufocus
 
 import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.lazy.LazyListPrefetchStrategy
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,9 +46,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** Cached per-frame size animation spec — avoids allocation on every recomposition. */
-private val HighlightSizeSpec: AnimationSpec<Float> = tween(durationMillis = 100, easing = FastOutSlowInEasing)
-
 /** Plain holder, not snapshot state: nothing observes which row the column last marked focused. */
 private class FocusedRowRef {
     var value: RokuFocusListState? = null
@@ -74,6 +71,7 @@ private class ColumnGeometry(
     val rowSpacingPx: Float
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun RokuLazyColumnImpl(
     rows: List<RokuResolvedRow>,
@@ -117,7 +115,15 @@ internal fun RokuLazyColumnImpl(
             }.coerceIn(0, rows.lastIndex)
         }
     }
-    val lazyColumnState = rememberLazyListState(initialFirstVisibleItemIndex = initialColumnRow)
+    // Remembered: `rememberLazyListState` keys its saveable on the strategy instance, so a fresh
+    // one per pass would rebuild the list state — and lose the scroll — on every recomposition.
+    val prefetchStrategy = remember(config.rowPrefetchItemCount) {
+        LazyListPrefetchStrategy(nestedPrefetchItemCount = config.rowPrefetchItemCount)
+    }
+    val lazyColumnState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialColumnRow,
+        prefetchStrategy = prefetchStrategy
+    )
 
     val selectedRowIndex = state.selectedRowIndex
     val activeRow = rows[selectedRowIndex]
@@ -376,7 +382,15 @@ internal fun RokuLazyColumnImpl(
             viewportWidthPx
         }
 
-        // ── Animate highlight: full spec for position, fast tween for size ──
+        // ── Animate highlight: position and size on one curve ──
+        //
+        // The width and height ran on their own 100ms tween while Y travelled on `verticalSpec`
+        // (a ~150ms spring for most consumers), so between two rows of different card shapes the
+        // box had finished changing shape while it was still a third of the way down. A consumer
+        // drawing its ring to the box saw the ring pop to the destination's shape at the top of
+        // the travel and then slide — the glitch every feed with mixed rails showed on vertical
+        // moves and never on horizontal ones. Size changes only ever come from a row change, so
+        // the vertical spec is the right clock for it and the two now finish together.
         //
         // 🚨 Keyed on whether the highlight is drawn at all. A row that hides it — a hero drawing
         // its own treatment, through `showHighlight = false` — still moves these targets, so while
@@ -393,9 +407,9 @@ internal fun RokuLazyColumnImpl(
             HighlightFrame(
                 x = animateFloatAsState(targetHighlightX, spec, label = "hl_x"),
                 y = animateFloatAsState(targetHighlightY, verticalSpec, label = "hl_y"),
-                width = animateFloatAsState(targetHighlightWidth, HighlightSizeSpec, label = "hl_w"),
+                width = animateFloatAsState(targetHighlightWidth, verticalSpec, label = "hl_w"),
                 height = animateFloatAsState(
-                    geometry.contentHeightPx[selectedRowIndex], HighlightSizeSpec, label = "hl_h"
+                    geometry.contentHeightPx[selectedRowIndex], verticalSpec, label = "hl_h"
                 ),
             )
         }

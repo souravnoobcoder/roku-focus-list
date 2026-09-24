@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-09-25
+
+### Changed
+
+- **The column's highlight changes size on `verticalAnimationSpec`, together with its Y.** Width and height ran on a fixed 100 ms tween while the position travelled on the vertical spec, so between two rows of different card shapes the box had finished changing shape a third of the way into its travel. A consumer drawing its ring to the box saw it pop to the destination's shape at the top of the move and then slide down — the glitch every feed with mixed rails showed on vertical moves and never on horizontal ones, which keep the shape. Size only ever changes with the row, so it now rides the same curve as the travel and the two finish together. Consumers with a single card shape see no difference.
+
+### Added
+
+- `RokuFocusConfig.rowPrefetchItemCount` (default `2`, Compose's own): how many items of the row a `RokuLazyColumn` is scrolling toward it composes ahead of the scroll, in idle frame time, through the lazy list's nested prefetch. Every card past that count composes in the frame the row enters the viewport — on a TV rail of six or seven visible cards that was one 30–50 ms frame per row on a mid-range Android TV, the hitch a fast run down a feed shows. Set it to the widest rail's visible count. Rows and grids are unaffected.
+
 ## [2.3.2] - 2026-09-17
 
 ### Fixed
