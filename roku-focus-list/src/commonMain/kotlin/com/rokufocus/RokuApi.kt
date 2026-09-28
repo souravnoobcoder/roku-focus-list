@@ -249,6 +249,11 @@ fun RokuLazyRow(
  *   while rows scroll behind it ([RokuFocusMode.Static]), or walking the visible rows and
  *   scrolling only at the window's edges ([RokuFocusMode.Floating]). Each row's horizontal mode is
  *   its own `focusMode`; the two axes are independent.
+ * @param verticalAnchorOffset How far below [contentPadding]'s top the column parks the row it
+ *   scrolls to: the selected row in Static, the window's top row in Floating. The part of the row
+ *   above that shows in the gap. Rows the column cannot scroll back that far, such as the first,
+ *   sit where an unscrolled column has them, so a hero at the top of the feed stays flush with it.
+ *   Unlike a larger top padding, it never moves the first row down. Defaults to none.
  * @param content Row declarations via [RokuLazyColumnScope.row] and
  *   [RokuLazyColumnScope.customRow].
  */
@@ -265,6 +270,7 @@ fun RokuLazyColumn(
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
     verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
+    verticalAnchorOffset: Dp = 0.dp,
     content: RokuLazyColumnScope.() -> Unit
 ) {
     val scope = RokuLazyColumnScope().apply(content)
@@ -347,6 +353,7 @@ fun RokuLazyColumn(
             contentPadding = contentPadding,
             rowSpacing = rowSpacing,
             verticalFocusMode = verticalFocusMode,
+            verticalAnchorOffset = verticalAnchorOffset,
             focusHighlight = focusHighlight,
             onItemSelected = onItemSelected,
             onItemClicked = onItemClicked,
@@ -454,6 +461,11 @@ private fun RokuColumnAutoMeasure(
  *   while rows scroll behind it ([RokuFocusMode.Static]), or walking the visible rows and
  *   scrolling only at the window's edges ([RokuFocusMode.Floating]). Each row's horizontal mode is
  *   its state's `focusMode`; the two axes are independent.
+ * @param verticalAnchorOffset How far below [contentPadding]'s top the column parks the row it
+ *   scrolls to: the selected row in Static, the window's top row in Floating. The part of the row
+ *   above that shows in the gap. Rows the column cannot scroll back that far, such as the first,
+ *   sit where an unscrolled column has them. Unlike a larger top padding, it never moves the
+ *   first row down. Defaults to none.
  * @param itemContent Composable for each item. Receives `(rowIndex, itemIndex, isFocused)`.
  */
 @Composable
@@ -471,6 +483,7 @@ fun RokuLazyColumn(
     onFocusExit: (() -> Unit)? = null,
     rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null,
     verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
+    verticalAnchorOffset: Dp = 0.dp,
     itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
 ) {
     // One wrapper per position, kept across passes: rebuilding them would hand every rail a new
@@ -498,6 +511,7 @@ fun RokuLazyColumn(
         contentPadding = contentPadding,
         rowSpacing = rowSpacing,
         verticalFocusMode = verticalFocusMode,
+        verticalAnchorOffset = verticalAnchorOffset,
         focusHighlight = focusHighlight,
         onItemSelected = onItemSelected,
         onItemClicked = onItemClicked,

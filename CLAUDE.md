@@ -102,14 +102,25 @@ totalColumnContent = topPad + sum(rowHeights) + (rows-1)*spacing + bottomPad
 maxVerticalScroll = max(0, totalColumnContent - viewportHeight)
 scrollTargetRow = Static   -> selectedRowIndex
                   Floating -> containVerticalWindow(windowAnchorRow, ...)  // pixel-based, minimal shift
-desiredVerticalScroll = rowCumOffset[scrollTargetRow]     // empty rows contribute 0 height
+anchored(row) = max(0, rowCumOffset[row] - anchorOffset) // anchorOffset = verticalAnchorOffset, 0 by default
+desiredVerticalScroll = anchored(scrollTargetRow)          // empty rows contribute 0 height
 verticalOverflow = max(0, desired - max)
-windowOffset = rowCumOffset[selectedRow] - desired        // 0 in Static
+windowOffset = rowCumOffset[selectedRow] - desired        // anchorOffset (or less near the top) in Static
 highlightY = topPad + windowOffset + verticalOverflow + headerHeight[selectedRow]
 ```
 Vertical floating containment is pixel-based (rows have heterogeneous heights): the selected row's
-`[top, top+height]` span must fit in `[rowCumOffset[anchor], rowCumOffset[anchor] + viewportHeight - topPad]`;
-the anchor advances to the first row that fits it, or retreats to the selected row itself.
+`[top, top+height]` span must fit in `[rowCumOffset[anchor], anchored(anchor) + viewportHeight - topPad]`;
+the anchor advances to the first row whose `anchored()` scroll fits it, or retreats to the selected
+row itself (a row peeking into the offset band is above the window).
+
+Every path that scrolls the column goes through the same absolute target, converted to the lazy
+list's `(index, offset)` by walking back from the target row (`rowAtOrBefore` / `offsetInto`, zero or
+one step for any realistic offset): the landing snap, the held-key snap, the animated step
+(`targetOffsetPx(leadingPx = anchorOffset)`) and its far-jump fallback. The initial
+`LazyListState` position is `anchoredScrollPosition` from the rows' declared Dp heights, because the
+first frame is measured before the landing scroll runs — without it a restored column shows its row
+flush at the top for one frame and then drops it. With `anchorOffset = 0` every expression reduces
+to the pre-offset one.
 
 ## Demo app: `app/`
 
@@ -202,7 +213,6 @@ stats) can be read from the Mac while someone swipes on the remote.
 ## Known issues / future work
 
 - `headerHeight` in `RokuColumnRowConfig` (state-based overload) must still be specified manually — only the DSL auto-measures
-- Vertical `focusSlot` is hardcoded to 0 (top-aligned) — could be made configurable like horizontal
 - `RokuLazyRow` standalone doesn't know `itemHeight`, so highlight overflow works on width only (height uses `fillMaxHeight`)
 - An empty row still leaves the row spacing on either side of it, because `LazyColumn` allocates spacing around a zero-height item
 - `RokuFocusEscape.start` / `.end` map to LEFT / RIGHT; nothing mirrors for RTL yet

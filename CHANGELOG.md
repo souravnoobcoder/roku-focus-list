@@ -7,15 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.4.1] - 2026-09-25
+### Added
+
+- **`RokuLazyColumn(verticalAnchorOffset = …)`: park the row the column scrolls to below the top instead of flush with it.** Every vertical scroll put its target row's top exactly at `contentPadding.top` — the selected row in `Static`, the window's top row in `Floating` — so the only way to lower it was a larger top padding, which also pushes the first row (a hero, say) down and leaves a strip above it. The offset moves only the scroll target: the row lands that far below the top padding, with the bottom of the row above it showing in the gap, while rows the column cannot scroll back that far, the first among them, stay exactly where an unscrolled column has them. `Floating` containment accounts for the shorter window below the anchor, so the selected row is never parked below the viewport, and a row peeking into the band counts as above the window. Every scroll path honours it — the animated step, the far jump, the held-key snap and a restored column's first frame — and the highlight follows the rows through the end-of-list clamp. Both overloads, default `0.dp`, which behaves exactly as before. Closes the "vertical `focusSlot` is hardcoded to 0" known issue.
+- `RokuVerticalAnchorMathTest` (the scroll target, containment, the lazy-list position a snap or restore lands on, zero-offset parity) and `RokuVerticalAnchorOffsetTest` (where rows and the highlight really land, per scroll path, in both modes, with a hero, at the end of the column and on a restored first frame).
+- `RokuItemCountConsistencyTest`: rails that grow, shrink, fill from empty and shift under an inserted row, on the column (both overloads), both `RokuLazyRow` overloads and the grid, with item lambdas that index an immutable list so a mismatch throws.
 
 ### Fixed
 
 - **A rail whose data changes no longer asks its item lambdas for an index their list does not have.** Every rail laid its items out from the row state's `itemCount`, which is snapshot state written during composition, while its `key` and item lambdas were the ones captured by the rail's last composition. The moment a new count landed, the LazyRow re-derived its items against the previous composition's lambdas, so a keyed rail that grew from one item to two called the old key lambda with index 1 and threw `IndexOutOfBoundsException: Index 1, Size 1`. It hit `RokuLazyColumn`'s `row { }` DSL, both `RokuLazyRow` overloads and `RokuFocusGrid`. The column's DSL had a second form of the same mismatch: it resolved a row's item lambda by *position* at call time, through a lambda Compose updates in place, so anything still composing against an older layout, such as a prefetched row resumed after the data changed, could be handed the newest list, which is how the same exception can surface from the item content lambda instead. Each rail now lays out the count captured with its key and item lambdas in one composition, and a column row carries its own item lambda instead of looking it up by position. `itemCount` on the states is unchanged and still drives navigation.
-
-### Added
-
-- `RokuItemCountConsistencyTest`: rails that grow, shrink, fill from empty and shift under an inserted row, on the column (both overloads), both `RokuLazyRow` overloads and the grid, with item lambdas that index an immutable list so a mismatch throws.
 
 ## [2.4.0] - 2026-09-25
 

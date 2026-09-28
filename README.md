@@ -506,6 +506,28 @@ Both modes remember their window across configuration changes and process death,
 the same edge-overflow correction. `focusSlot` only means something in `Static` — a floating
 window has no fixed slot — so it is ignored in `Floating`.
 
+### Parking rows below the top: `verticalAnchorOffset`
+
+By default the column scrolls its target row flush with `contentPadding.top`: the selected row in
+`Static`, the window's top row in `Floating`. `verticalAnchorOffset` parks it lower, with the
+bottom of the row above showing in the gap, which tells the viewer there is more above:
+
+```kotlin
+RokuLazyColumn(
+    verticalFocusMode = RokuFocusMode.Floating,
+    verticalAnchorOffset = 24.dp,
+) {
+    customRow(height = 400.dp) { Hero() }   // stays flush with the top
+    row(itemWidth = 220.dp, itemHeight = 140.dp) { /* items */ }
+}
+```
+
+It is not the same as a larger top padding. Padding moves every row down, the first one included,
+so a full-bleed hero gains a strip above it. The offset only changes where a scroll lands: rows the
+column cannot scroll back that far, the first among them, stay where an unscrolled column has them.
+In `Floating` the window below the anchor is shorter by the offset, and containment accounts for
+it, so the selected row is never parked below the viewport.
+
 ---
 
 ## Entering a row: spatial or remembered

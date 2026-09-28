@@ -102,17 +102,18 @@ internal fun LazyListState.absoluteOffsetPx(stepPx: Float): Float =
     firstVisibleItemIndex * stepPx + firstVisibleItemScrollOffset
 
 /**
- * The absolute offset that puts [index] at the leading edge, clamped to what the list can scroll.
- * Prefers the item's measured position when it is on screen — exact by construction — over the
- * [estimatedPx] the caller derived from its own geometry.
+ * The absolute offset that puts [index] [leadingPx] past the leading edge, clamped to what the
+ * list can scroll. Prefers the item's measured position when it is on screen — exact by
+ * construction — over the [estimatedPx] the caller derived from its own geometry.
  */
 internal fun LazyListState.targetOffsetPx(
     index: Int,
     currentPx: Float,
     estimatedPx: Float,
-    maxScrollPx: Float
+    maxScrollPx: Float,
+    leadingPx: Float = 0f
 ): Float {
     val visible = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
     val target = if (visible != null) currentPx + visible.offset else estimatedPx
-    return target.coerceIn(0f, maxScrollPx.coerceAtLeast(0f))
+    return (target - leadingPx).coerceIn(0f, maxScrollPx.coerceAtLeast(0f))
 }
