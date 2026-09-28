@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-28
+
 ### Added
 
 - **`RokuLazyColumn(verticalAnchorOffset = …)`: park the row the column scrolls to below the top instead of flush with it.** Every vertical scroll put its target row's top exactly at `contentPadding.top` — the selected row in `Static`, the window's top row in `Floating` — so the only way to lower it was a larger top padding, which also pushes the first row (a hero, say) down and leaves a strip above it. The offset moves only the scroll target: the row lands that far below the top padding, with the bottom of the row above it showing in the gap, while rows the column cannot scroll back that far, the first among them, stay exactly where an unscrolled column has them. `Floating` containment accounts for the shorter window below the anchor, so the selected row is never parked below the viewport, and a row peeking into the band counts as above the window. Every scroll path honours it — the animated step, the far jump, the held-key snap and a restored column's first frame — and the highlight follows the rows through the end-of-list clamp. Both overloads, default `0.dp`, which behaves exactly as before. Closes the "vertical `focusSlot` is hardcoded to 0" known issue.
