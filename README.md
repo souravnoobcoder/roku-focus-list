@@ -1,18 +1,31 @@
 # RokuFocus
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.souravnoobcoder/roku-focus-list.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/io.github.souravnoobcoder/roku-focus-list)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.2.21-blue.svg)](https://kotlinlang.org)
-[![Compose Multiplatform](https://img.shields.io/badge/Compose%20Multiplatform-1.10.3-blue.svg)](https://www.jetbrains.com/lp/compose-multiplatform/)
-[![API](https://img.shields.io/badge/API-24%2B-brightgreen.svg)](https://developer.android.com/about/versions/nougat)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4.10-blue.svg)](https://kotlinlang.org)
+[![Compose Multiplatform](https://img.shields.io/badge/Compose%20Multiplatform-1.12.0-blue.svg)](https://www.jetbrains.com/lp/compose-multiplatform/)
+[![API](https://img.shields.io/badge/API-23%2B-brightgreen.svg)](https://developer.android.com/about/versions/marshmallow)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Roku-style fixed-focus D-pad navigation for **Android TV**, **Fire TV**, and any other Compose
-target — built as a **Kotlin Multiplatform / Compose Multiplatform** library.
+**Fixed-focus D-pad and remote navigation for TV apps built with Jetpack Compose and Compose
+Multiplatform.** Runs on **Android TV**, **Google TV**, **Fire TV**, **Apple TV (tvOS)**, **Samsung
+Tizen TV** (wasmJs) and desktop, from one `commonMain` dependency:
+
+```kotlin
+implementation("io.github.souravnoobcoder:roku-focus-list:2.5.1")
+```
 
 The focus highlight stays locked at a fixed screen position while content smoothly scrolls behind
 it — exactly how Roku TV navigation works. Supports horizontal rows, full OTT grid layouts
 (vertical + horizontal), heterogeneous rows, wrap-around, key-repeat acceleration, and custom
 highlight rendering.
+
+If you are fighting Compose focus on a TV, this is the problem it solves: focus jumping between
+rows, a `LazyRow` that loses focus or snaps while it scrolls, the highlight landing on the wrong card
+when you come back to a screen, D-pad key repeat that runs away from the user, or rebuilding
+Leanback's `BrowseSupportFragment` rows by hand. RokuFocus keeps one focusable per list and draws one
+highlight, so a Netflix or Roku-style home screen of rows, a poster grid, or a single carousel
+behaves the same on every TV platform. Stuck on a Gradle error? See
+[Build errors and fixes](#build-errors-and-fixes).
 
 ## Why RokuFocus?
 
@@ -130,7 +143,7 @@ Published to Maven Central, so `mavenCentral()` in your repositories is all the 
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("io.github.souravnoobcoder:roku-focus-list:2.3.0")
+            implementation("io.github.souravnoobcoder:roku-focus-list:2.5.1")
         }
     }
 }
@@ -143,7 +156,7 @@ for `commonMain`, the AAR for Android, a jar for desktop, klibs for iOS.
 
 ```kotlin
 dependencies {
-    implementation("io.github.souravnoobcoder:roku-focus-list:2.3.0")
+    implementation("io.github.souravnoobcoder:roku-focus-list:2.5.1")
 }
 ```
 
@@ -151,6 +164,206 @@ dependencies {
 > Runtime, and Runtime-Saveable.
 
 Upgrading from 1.x? See the [migration table](#migrating-from-1x-to-20).
+
+---
+
+## Build errors and fixes
+
+Every error below was reproduced against the published artifact from Maven Central. Each one ends
+with a prompt you can paste into an AI coding assistant (Claude Code, Copilot, Cursor, Gemini) to
+apply the fix in your own project.
+
+### `requires libraries and applications that depend on it to compile against version 37 or later`
+
+```
+Execution failed for task ':app:checkDebugAarMetadata'.
+  Dependency 'io.github.souravnoobcoder:roku-focus-list-android:2.5.1' requires libraries and
+  applications that depend on it to compile against version 37 or later of the Android APIs.
+  :app is currently compiled against android-36.
+```
+
+**Why:** the library is built on Compose 1.12.0, whose Android artifacts declare compileSdk 37 in
+their AAR metadata. The same message repeats for `androidx.compose.*:1.12.0` artifacts.
+
+**Fix:** set `compileSdk = 37` in the app (and in every Android module that depends on the
+library). `targetSdk` and `minSdk` do not have to change.
+
+```text
+My Android build fails in checkDebugAarMetadata: io.github.souravnoobcoder:roku-focus-list
+requires compileSdk 37 or later. Raise compileSdk to 37 in every Android module that depends on
+it, leave targetSdk and minSdk unchanged, install the Android 37 SDK platform if it is missing,
+then run ./gradlew assembleDebug and confirm it passes.
+```
+
+### `requires Android Gradle plugin 9.1.0 or higher`
+
+```
+Execution failed for task ':app:checkDebugAarMetadata'.
+  Dependency 'androidx.compose.foundation:foundation-layout-android:1.12.0' requires Android
+  Gradle plugin 9.1.0 or higher.
+  This build currently uses Android Gradle plugin 8.13.2.
+```
+
+**Why:** Compose 1.12.0, which the library pulls in, needs AGP 9.1+.
+
+**Fix:** upgrade AGP to 9.1 or newer (and Gradle to the version that AGP asks for). AGP 9 has Kotlin
+support built in, which leads straight to the next error.
+
+```text
+My build fails because androidx.compose 1.12.0 (pulled in by
+io.github.souravnoobcoder:roku-focus-list) requires Android Gradle plugin 9.1.0 or higher.
+Upgrade AGP to the latest 9.x and the Gradle wrapper to the version that AGP requires, migrate
+any AGP 9 breaking changes in my build files (including removing the
+org.jetbrains.kotlin.android plugin, which AGP 9 replaces with built-in Kotlin), then build and
+fix what remains.
+```
+
+### `The 'org.jetbrains.kotlin.android' plugin is no longer required for Kotlin support since AGP 9.0`
+
+```
+An exception occurred applying plugin request [id: 'org.jetbrains.kotlin.android', version: '2.4.10']
+> Failed to apply plugin 'org.jetbrains.kotlin.android'.
+   The 'org.jetbrains.kotlin.android' plugin is no longer required for Kotlin support since AGP 9.0.
+   Solution: Remove the 'org.jetbrains.kotlin.android' plugin from this project's build file
+```
+
+**Why:** you upgraded to AGP 9 to satisfy the error above, and AGP 9 compiles Kotlin itself.
+
+**Fix:** delete `kotlin("android")` / `id("org.jetbrains.kotlin.android")` (and its `alias(...)` in
+the version catalog) from Android application and library modules. Keep
+`org.jetbrains.kotlin.plugin.compose`.
+
+```text
+After upgrading to AGP 9 my build fails with "The 'org.jetbrains.kotlin.android' plugin is no
+longer required for Kotlin support since AGP 9.0". Remove org.jetbrains.kotlin.android from every
+Android module and from the version catalog, keep the Compose compiler plugin, move any
+kotlinOptions { } blocks that no longer resolve to kotlin { compilerOptions { } }, then build.
+```
+
+### `uses-sdk:minSdkVersion 21 cannot be smaller than version 23 declared in library`
+
+```
+Manifest merger failed : uses-sdk:minSdkVersion 21 cannot be smaller than version 23 declared in
+library [io.github.souravnoobcoder:roku-focus-list-android:2.5.1]
+```
+
+**Why:** the library's minSdk is 23 (Android 6.0).
+
+**Fix:** raise your app's `minSdk` to 23 or higher. `tools:overrideLibrary` silences the error but
+can crash at runtime on older devices.
+
+```text
+My manifest merge fails because io.github.souravnoobcoder:roku-focus-list declares minSdk 23 and
+my app uses a lower minSdk. Raise minSdk to 23 in the app's build.gradle.kts (not
+tools:overrideLibrary), check whether any code paths guarded by Build.VERSION checks below 23 can
+now be deleted, and build again.
+```
+
+### `Module was compiled with an incompatible version of Kotlin`
+
+```
+e: .../roku-focus-list-desktop-2.5.1.jar!/META-INF/io.github.souravnoobcoder_roku-focus-list.kotlin_module
+   Module was compiled with an incompatible version of Kotlin. The binary version of its metadata
+   is 2.4.0, expected version is 2.2.0.
+e: Unresolved reference 'RokuLazyRow'.
+```
+
+**Why:** the library is compiled with Kotlin 2.4.10, and a Kotlin compiler can read metadata at most
+one minor version newer than itself. Kotlin 2.2 and older cannot read it; Kotlin 2.3.0 can.
+
+**Fix:** move the Kotlin Gradle plugin and the Compose compiler plugin to 2.4.x (2.3.0 at the
+minimum). They must be the same version.
+
+```text
+My Kotlin compile fails with "Module was compiled with an incompatible version of Kotlin. The
+binary version of its metadata is 2.4.0" for io.github.souravnoobcoder:roku-focus-list. Upgrade
+the Kotlin Gradle plugin and org.jetbrains.kotlin.plugin.compose to the same 2.4.x version
+everywhere they are declared (version catalog, settings, buildscript classpath), fix any new
+compiler errors, and build.
+```
+
+### tvOS: `No matching variant of org.jetbrains.compose.foundation:foundation:1.12.0 ... 'tvos_arm64'`
+
+```
+Execution failed for task ':compileKotlinTvosArm64'.
+> Could not resolve org.jetbrains.compose.foundation:foundation:1.12.0.
+  > No matching variant of org.jetbrains.compose.foundation:foundation:1.12.0 was found. The
+    consumer was configured to find ... attribute 'org.jetbrains.kotlin.native.target' with value
+    'tvos_arm64' ...
+```
+
+**Why:** JetBrains publishes no tvOS builds of Compose Multiplatform. The library's tvOS klib
+resolves fine; Compose itself is what is missing.
+
+**Fix:** add the `dev.sajidali.compose-tvos` settings plugin, as shown in
+[Apple TV (tvOS)](#apple-tv-tvos). Leave `strictMode` off.
+
+```text
+My Kotlin Multiplatform build fails on tvosArm64 / tvosSimulatorArm64 with "No matching variant
+of org.jetbrains.compose.foundation:foundation:1.12.0 ... tvos_arm64". Add
+id("dev.sajidali.compose-tvos") version "1.4.2" in a plugins { } block directly after
+pluginManagement { } in settings.gradle.kts, make sure gradlePluginPortal() is in
+pluginManagement repositories, do not enable composeTvos strictMode, then run
+./gradlew compileKotlinTvosArm64.
+```
+
+### `No matching variant of io.github.souravnoobcoder:roku-focus-list ... 'ios_x64'`
+
+```
+Execution failed for task ':compileKotlinIosX64'.
+> Could not resolve io.github.souravnoobcoder:roku-focus-list:2.5.1.
+  > No matching variant of io.github.souravnoobcoder:roku-focus-list:2.5.1 was found. The
+    consumer was configured to find ... attribute 'org.jetbrains.kotlin.native.target' with
+    value 'ios_x64' ...
+```
+
+**Why:** Compose Multiplatform 1.11+ ships no Apple x86_64 artifacts, so neither does this library.
+The same applies to `tvosX64`.
+
+**Fix:** remove `iosX64()` / `tvosX64()` and build simulators with `iosSimulatorArm64()` /
+`tvosSimulatorArm64()` on an Apple Silicon Mac.
+
+```text
+My KMP build fails resolving io.github.souravnoobcoder:roku-focus-list for iosX64 (or tvosX64)
+with "No matching variant ... ios_x64". Compose Multiplatform no longer ships x86_64 Apple
+artifacts. Remove the iosX64() and tvosX64() targets and any source sets or framework
+configurations that reference them, keep iosArm64/iosSimulatorArm64 (and the tvOS arm64 pair),
+and build again.
+```
+
+### `Could not find roku-focus-list-iosarm64-<version>.jar` (JitPack)
+
+**Why:** the dependency is coming from JitPack (`com.github...:roku-focus-list`). JitPack rewrites
+Kotlin Multiplatform metadata and cannot serve this library.
+
+**Fix:** use `io.github.souravnoobcoder:roku-focus-list` from `mavenCentral()` and drop the
+`jitpack.io` repository if nothing else needs it.
+
+```text
+Replace the JitPack coordinate com.github.*:roku-focus-list with
+io.github.souravnoobcoder:roku-focus-list:2.5.1 from mavenCentral(), remove the
+maven("https://jitpack.io") repository if no other dependency uses it, then sync and build.
+```
+
+### It builds, but focus or layout is wrong
+
+These are not build errors, but they are the two runtime problems people hit first. Both are
+covered in [Two things that will bite you](#two-things-that-will-bite-you).
+
+- **The highlight stops following the selection:** an item uses `Modifier.clickable`, which adds a
+  second focus target. Use `onItemClicked` for the D-pad and `pointerInput { detectTapGestures }`
+  for touch.
+- **Cards are half size and scrolling stutters on a real Apple TV HD:** the platform reports
+  density 1.0. Pin a design density with `LocalDensity`.
+
+```text
+I use io.github.souravnoobcoder:roku-focus-list on a TV. Search my item composables for
+Modifier.clickable or other focusable modifiers inside RokuLazyRow / RokuLazyColumn /
+RokuFocusGrid items and replace them: D-pad clicks go through onItemClicked, touch through
+Modifier.pointerInput { detectTapGestures { ... } }. Then check whether the app pins
+LocalDensity on TV; if not, wrap the root in BoxWithConstraints and provide
+Density(constraints.maxWidth / 960f, fontScale = 1f).
+```
 
 ---
 
@@ -1014,7 +1227,9 @@ which is why no platform-specific source set is needed.
 
 ## Requirements
 
-- **Kotlin** 2.4.x (built with 2.4.10)
+- **Kotlin** 2.4.x recommended (built with 2.4.10). A JVM or Android consumer on Kotlin 2.3.0
+  also compiles against it; 2.2 and older cannot read its metadata (see
+  [Build errors and fixes](#build-errors-and-fixes))
 - **Compose Multiplatform** 1.12.0, or **Jetpack Compose** 1.12.0 / BOM 2026.08.00 for Android-only projects
 - **AGP** 9.1+ and **compileSdk** 37 for Android consumers — required by Compose Multiplatform 1.12.0's
   Android artifacts, which declare it in their aar-metadata
@@ -1117,6 +1332,74 @@ created via GitHub.
 Signing is conditional in the build: without a key, `publishToMavenLocal` still works, so
 contributors are not blocked. The workflow refuses to upload if the key is missing rather than
 publishing unsigned.
+
+---
+
+## FAQ
+
+### How do I keep focus at a fixed position in a Jetpack Compose TV `LazyRow`?
+
+Use `RokuLazyRow` in place of `LazyRow`. The highlight stays in its slot and the cards slide under it:
+
+```kotlin
+RokuLazyRow(onItemClicked = { index -> open(movies[index]) }) {
+    items(movies) { movie, isFocused -> MovieCard(movie, isFocused) }
+}
+```
+
+### How do I build a Netflix or Roku-style home screen with D-pad focus in Compose?
+
+Use `RokuLazyColumn` with one `row { }` per rail. UP/DOWN moves between rails, LEFT/RIGHT moves
+within one, and a single highlight animates between rails of different card sizes. See
+[Full OTT home screen](#2-full-ott-home-screen-from-shared-code). For a poster wall, use
+[`RokuFocusGrid`](#grid-rokufocusgrid).
+
+### Why does focus jump or get lost when my `LazyRow` scrolls on Android TV?
+
+With Compose's default model every card is a focus target, so the list scrolls to chase whichever
+card took focus, and a focused card that scrolls out of composition takes focus with it. RokuFocus
+keeps one focus target per list and moves a selection index instead, so scrolling can never drop
+focus and the motion is decided by the library, not by `bringIntoView`.
+
+### How do I restore the selected card when the user comes back to a screen?
+
+Nothing to wire: `rememberRokuColumnState()` and `rememberRokuFocusListState()` are backed by
+`rememberSaveable`, so selection survives configuration changes, process death and back-stack
+navigation. See [State, hoisting and restoration](#state-hoisting-and-restoration).
+
+### Can the highlight move across the cards instead (Apple TV / Google TV style)?
+
+Yes. `RokuFocusMode.Floating` holds the list still and walks the highlight, scrolling only at the
+window's edges. See [Focus modes](#focus-modes-static-vs-floating).
+
+### Does it work on Apple TV and the Siri Remote touchpad?
+
+Yes, from the same `commonMain` code. Add the `compose-tvos` settings plugin
+([Apple TV](#apple-tv-tvos)), then provide a `RokuTouchpad` and call `attachSiriRemote(view)` so
+every list follows the thumb like the native focus engine ([Touchpad remotes](#touchpad-remotes)).
+
+### Does it work on Samsung TVs?
+
+Through the `wasmJs` target on Tizen 9.0 (2025 TVs) and newer. Tizen 8.0 cannot run Compose for
+web. See [Samsung TV](#samsung-tv-tizen).
+
+### How is this different from Leanback or `androidx.tv` (tv-foundation, tv-material)?
+
+Leanback is the View-based TV toolkit; RokuFocus is pure Compose. `androidx.tv` gives you
+TV-styled components on top of Compose's default focus model, where focus moves card to card.
+RokuFocus replaces the focus model itself: one focusable per list, a fixed or floating highlight
+you draw once, key-repeat throttling, wrap-around and per-edge focus escape. Draw card content with
+plain composables; a focusable tv-material `Card` or `Surface` inside an item adds a second focus
+target, the same problem as [`Modifier.clickable`](#dont-put-modifierclickable-on-item-content).
+
+### Does it depend on Material?
+
+No. Only Compose runtime, foundation, UI and animation, so it fits any design system.
+
+### My build fails after adding it. What now?
+
+See [Build errors and fixes](#build-errors-and-fixes): each known error has its cause, the fix,
+and a prompt you can paste into an AI coding assistant.
 
 ---
 

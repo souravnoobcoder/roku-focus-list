@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-10-12
+
+No code changes; the library is byte-for-byte the 2.5.0 sources.
+
+### Changed
+
+- **The published POM description names the platforms and the problem it solves** (Android TV, Google TV, Fire TV, Apple TV, Samsung Tizen; Leanback and `androidx.tv` focus alternative) and links the docs, so Maven Central search finds it.
+
+### Added
+
+- **README: Build errors and fixes.** Every Gradle error a consumer is likely to hit, reproduced against the published artifact and quoted verbatim: compileSdk 37 and AGP 9.1 from the AAR metadata check, the AGP 9 `org.jetbrains.kotlin.android` removal, the minSdk 23 manifest merge, Kotlin metadata 2.4.0 on an older compiler (2.3.0 is the verified minimum for a JVM consumer), the tvOS Compose resolution without the `compose-tvos` plugin, `iosX64`, and JitPack. Each has the cause, the fix and a prompt to paste into an AI coding assistant.
+- **README: FAQ** in the words people search with, and an `llms.txt` at the repository root summarising the library for AI assistants.
+- The install snippets now show the current version, and the Kotlin, Compose Multiplatform and API badges match the build.
 ## [2.5.0] - 2026-09-28
 
 ### Added
@@ -197,7 +210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Callbacks: `onItemSelected`, `onItemClicked`, `onFocusEnter`, `onFocusExit`.
 - Demo app with 10 rows, 6 card types, 308 items.
 
-[Unreleased]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.3.0...HEAD
+[Unreleased]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.5.1...HEAD
+[2.5.1]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.5.0...2.5.1
 [2.3.0]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.2.0...2.3.0
 [2.0.0]: https://github.com/souravnoobcoder/roku-focus-list/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/souravnoobcoder/roku-focus-list/releases/tag/v1.0.0
