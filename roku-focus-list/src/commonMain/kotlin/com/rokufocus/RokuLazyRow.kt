@@ -30,9 +30,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
+/**
+ * @param itemCount The count declared alongside [itemKey] and [itemContent]; see [RokuRowContent].
+ */
 @Composable
 internal fun RokuLazyRowImpl(
     state: RokuFocusListState,
+    itemCount: Int,
     modifier: Modifier = Modifier,
     config: RokuFocusConfig = DefaultRokuFocusConfig,
     contentPadding: PaddingValues = PaddingValues(0.dp),
@@ -47,7 +51,7 @@ internal fun RokuLazyRowImpl(
     itemContentDescription: ((index: Int) -> String?)? = null,
     itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
 ) {
-    if (state.itemCount == 0) return
+    if (itemCount == 0) return
 
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
@@ -142,6 +146,7 @@ internal fun RokuLazyRowImpl(
 
         RokuRowContent(
             state = state,
+            itemCount = itemCount,
             contentPadding = contentPadding,
             itemWidth = itemWidth,
             itemSpacing = itemSpacing,

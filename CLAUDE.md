@@ -44,7 +44,7 @@ UIKit. Nothing else in the library touches a platform API, so there is no `andro
 | `RokuKeyHandler.kt` | `Modifier.rokuKeyHandler()` — used by standalone `RokuLazyRow`. Handles LEFT/RIGHT + Enter, passes UP/DOWN through. A plain modifier factory; repeat state lives on `RokuFocusListState`. Also holds `moveWithinRow`, the escape-edge lookup, and the public `rokuMoveBy` / `rokuMoveRowsBy` / `rokuMoveItemsBy` / `rokuMoveColumnsBy` — edge-aware multi-step moves (a row, a column's rows, a column's active row, a grid) that apply the escape policy and `onBoundaryHit` once per move, never per step. `RokuTouchpad` drives the components through these. |
 | `RokuColumnKeyHandler.kt` | Internal `Modifier.rokuColumnKeyHandler()`. Handles ALL D-pad events for `RokuLazyColumn`: UP/DOWN between selectable rows, LEFT/RIGHT/ENTER to the active row's state or to a custom row's `onKeyEvent`. |
 | `RokuClock.kt` | Internal monotonic ms clock built on `kotlin.time.TimeSource.Monotonic`. Replaces `android.os.SystemClock.uptimeMillis()`. |
-| `RokuFocusConfig.kt` | Config data class: animation spec, key repeat delay + acceleration, wrapAround, haptics, `focusEscape`, then appended in order (positional 2.x calls keep their meaning): `rowEntry`, `verticalAnimationSpec` (null → highlight spec for Y, `RokuScrollAnimator`'s default spring for the scroll; set → both, so the highlight and the content travel between rows on one curve — the user asked to control vertical D-pad speed in the column), `verticalKeyRepeatDelayMs` (null → `keyRepeatDelayMs`; the accelerated delay stays shared). Touchpad pacing is on `RokuTouchpadConfig`, not here (an earlier unreleased draft had fling-to-steps knobs and `stepsForVelocity` on this class; the drag model replaced them before 2.3.0 shipped). Keeps a deprecated `allowFocusEscape` factory and read-path extension. |
+| `RokuFocusConfig.kt` | Config data class: animation spec, key repeat delay + acceleration, wrapAround, haptics, `focusEscape`, then appended in order (positional 2.x calls keep their meaning): `rowEntry`, `verticalAnimationSpec` (null → highlight spec for Y, `RokuScrollAnimator`'s default spring for the scroll; set → both, so the highlight and the content travel between rows on one curve — the user asked to control vertical D-pad speed in the column), `verticalKeyRepeatDelayMs` (null → `keyRepeatDelayMs`; the accelerated delay stays shared), `rowPrefetchItemCount` (default 2 = Compose's nested prefetch; the column's `LazyListState` is built with a remembered `LazyListPrefetchStrategy(nestedPrefetchItemCount)` so an incoming row's cards compose ahead of the scroll — a TV consumer sets it to the widest rail's visible count). In the column `verticalAnimationSpec` also drives the highlight's width and height (they had a 100ms tween of their own, which made the box pop to the next row's shape at the top of its travel). Touchpad pacing is on `RokuTouchpadConfig`, not here (an earlier unreleased draft had fling-to-steps knobs and `stepsForVelocity` on this class; the drag model replaced them before 2.3.0 shipped). Keeps a deprecated `allowFocusEscape` factory and read-path extension. |
 | `RokuAnimationSpec.kt` | Preset animation specs (Default, Fast, Smooth). |
 
 Tests live in `src/commonTest/kotlin/com/rokufocus/` and run on the desktop JVM target
@@ -64,6 +64,7 @@ Tests live in `src/commonTest/kotlin/com/rokufocus/` and run on the desktop JVM 
 - **Floating mode stores a raw window anchor, contained at write time.** `RokuFocusListState.windowAnchor` / `RokuColumnState.windowAnchorRow` follow the requested-index philosophy: stored raw, bounds-clamped on read, so a shrunken list gives the window back when items return. Containment (shifting the anchor minimally when the selection exits the window) runs from the writes — `scrollTo`, `updateItemCount`, the `visibleCount` setter, and for the column from composition in `RokuLazyColumnImpl`, the only place the pixel geometry exists. It is deliberately NOT in the `windowStart` getter: a read-side shift that is never stored flip-flops back to the stale anchor on the next in-window move. Containment compares against the *clamped* window so a purely data-driven shrink never overwrites the raw anchor. Both anchors are in the `Saver`s. `focusSlot` is ignored while floating. In `Static` mode every code path is unchanged.
 - **A key press does no O(rows) work and allocates nothing.** `ColumnGeometry` precomputes every per-row px value (header/content/item/spacing/padding arrays, cumulative offsets, max scroll) inside a `derivedStateOf` keyed on the resolved rows — its only observable inputs are the rows' item counts, so it recomputes when content arrives or leaves, never on a selection move, which just indexes the arrays. The per-rail `visibleCount` sync is `remember`-keyed on (rows, maxWidth, layoutDirection) for the same reason. `RowMetrics`/`ActiveRowPx` (per-press list allocation + O(rows) value compares) were removed.
 - **Recomposition is confined to what actually changed.** The column's LazyColumn row content is ONE remembered lambda (`rows` is an unstable List — an inline lambda would be recreated every pass and invalidate every visible row and, through the replaced inner composable lambdas, every card wrapper). Selection is read per item/per row via `derivedStateOf`, and `RokuRowContent` receives row focus as a lambda, not a Boolean. `updateItemCount` / `visibleCount` guard on value equality BEFORE calling `containWindow()` — they run from composition every pass, and containment's selection reads would otherwise subscribe that scope to every future key press (measured: this was recomposing the whole DSL wrapper per press).
+- **A rail lays out the count captured with its lambdas, never the state's live count.** `RokuRowContent` / `RokuLazyRowImpl` take an explicit `itemCount`, the grid captures `state.itemCount` in the composition that received `itemKey` / `itemContent`, and `RokuResolvedRow.Items` carries its row's `itemCount` + `itemContent` from the one composition that declared them. The state's `_itemCount` is snapshot state written during composition, and a LazyRow whose DSL reads it re-derives its items (building the key map eagerly) the moment the write is applied, against the key and content lambdas of the previous composition: a keyed rail growing 1 → 2 called the old key with index 1 (`Index 1, Size 1`, reproduced in `RokuItemCountConsistencyTest` on the column DSL, both row overloads and the grid). The column also no longer resolves a row's item lambda by position through the DSL scope: that lambda was one `ComposableLambdaImpl` updated in place, so any composition still running against an older layout was handed the newest list. The state-based column keeps one wrapper per position (`remember(itemContent, rows.size)`) so a count change on one row does not hand every rail a new lambda. `state.itemCount` still drives navigation, selection and scroll geometry.
 - **DSL rows auto-measure omitted sizes.** `row()` defaults `itemWidth`/`itemHeight`/`headerHeight` to `Dp.Unspecified`; `RokuColumnAutoMeasure` composes the first item / header invisibly once per row (keyed like row state) and stores dp sizes in state maps. While unmeasured, `RokuResolvedRow.Items.awaitingMeasure` makes the row behave exactly like an empty one (unselectable, zero geometry, renders nothing), so nothing scrolls or highlights against made-up sizes; measurement lands within a frame through the late-arriving-rows machinery.
 - **A row with zero items is not selectable.** UP/DOWN steps over it, the highlight never parks on it, it renders nothing (not even its header) and contributes zero height to the column geometry. Its row index and key are unchanged.
 - **The column re-scrolls when the geometry changes, not only when the selection does.** `animateScrollToItem` clamps at the end of a still-loading list; without re-running when rows arrive, the real scroll offset diverges from the offset the highlight maths assumes.
@@ -101,14 +102,25 @@ totalColumnContent = topPad + sum(rowHeights) + (rows-1)*spacing + bottomPad
 maxVerticalScroll = max(0, totalColumnContent - viewportHeight)
 scrollTargetRow = Static   -> selectedRowIndex
                   Floating -> containVerticalWindow(windowAnchorRow, ...)  // pixel-based, minimal shift
-desiredVerticalScroll = rowCumOffset[scrollTargetRow]     // empty rows contribute 0 height
+anchored(row) = max(0, rowCumOffset[row] - anchorOffset) // anchorOffset = verticalAnchorOffset, 0 by default
+desiredVerticalScroll = anchored(scrollTargetRow)          // empty rows contribute 0 height
 verticalOverflow = max(0, desired - max)
-windowOffset = rowCumOffset[selectedRow] - desired        // 0 in Static
+windowOffset = rowCumOffset[selectedRow] - desired        // anchorOffset (or less near the top) in Static
 highlightY = topPad + windowOffset + verticalOverflow + headerHeight[selectedRow]
 ```
 Vertical floating containment is pixel-based (rows have heterogeneous heights): the selected row's
-`[top, top+height]` span must fit in `[rowCumOffset[anchor], rowCumOffset[anchor] + viewportHeight - topPad]`;
-the anchor advances to the first row that fits it, or retreats to the selected row itself.
+`[top, top+height]` span must fit in `[rowCumOffset[anchor], anchored(anchor) + viewportHeight - topPad]`;
+the anchor advances to the first row whose `anchored()` scroll fits it, or retreats to the selected
+row itself (a row peeking into the offset band is above the window).
+
+Every path that scrolls the column goes through the same absolute target, converted to the lazy
+list's `(index, offset)` by walking back from the target row (`rowAtOrBefore` / `offsetInto`, zero or
+one step for any realistic offset): the landing snap, the held-key snap, the animated step
+(`targetOffsetPx(leadingPx = anchorOffset)`) and its far-jump fallback. The initial
+`LazyListState` position is `anchoredScrollPosition` from the rows' declared Dp heights, because the
+first frame is measured before the landing scroll runs — without it a restored column shows its row
+flush at the top for one frame and then drops it. With `anchorOffset = 0` every expression reduces
+to the pre-offset one.
 
 ## Demo app: `app/`
 
@@ -201,7 +213,6 @@ stats) can be read from the Mac while someone swipes on the remote.
 ## Known issues / future work
 
 - `headerHeight` in `RokuColumnRowConfig` (state-based overload) must still be specified manually — only the DSL auto-measures
-- Vertical `focusSlot` is hardcoded to 0 (top-aligned) — could be made configurable like horizontal
 - `RokuLazyRow` standalone doesn't know `itemHeight`, so highlight overflow works on width only (height uses `fillMaxHeight`)
 - An empty row still leaves the row spacing on either side of it, because `LazyColumn` allocates spacing around a zero-height item
 - `RokuFocusEscape.start` / `.end` map to LEFT / RIGHT; nothing mirrors for RTL yet

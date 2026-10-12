@@ -33,6 +33,11 @@ import androidx.compose.ui.unit.dp
  * The caller ([RokuLazyRow] or [RokuLazyColumn]) handles all of that.
  */
 /**
+ * @param itemCount How many items the LazyRow lays out. Taken from the composition that produced
+ *   [itemKey] and [itemContent], never read from [state]: the state's count is snapshot state, and
+ *   the LazyRow re-derives its items the moment a new count is applied, before this composable has
+ *   been handed the lambdas that go with it, so a grown row would ask the previous lambdas for an
+ *   index their list does not have.
  * @param rowFocused Read per item, inside a `derivedStateOf`, and merged into the `isFocused`
  *   value handed to [itemContent]. A lambda rather than a Boolean so a row focus flip invalidates
  *   only the selected item instead of replacing this composable's parameters.
@@ -42,6 +47,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun RokuRowContent(
     state: RokuFocusListState,
+    itemCount: Int,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     itemWidth: Dp,
@@ -53,7 +59,7 @@ internal fun RokuRowContent(
     focusedItemModifier: Modifier = Modifier,
     itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit
 ) {
-    if (state.itemCount == 0) return
+    if (itemCount == 0) return
 
     // The freshest rowFocused, readable from inside the long-lived per-item deriveds below. When
     // a keyed move hands this composable a new lambda (its row shifted position in the column),
@@ -122,7 +128,7 @@ internal fun RokuRowContent(
         userScrollEnabled = false
     ) {
         items(
-            count = state.itemCount,
+            count = itemCount,
             key = itemKey ?: { it }
         ) { index ->
             // Derived per item: a selection change recomposes the two items whose value flipped,

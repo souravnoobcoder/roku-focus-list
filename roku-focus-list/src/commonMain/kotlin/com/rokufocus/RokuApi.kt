@@ -125,6 +125,7 @@ fun RokuLazyRow(
         val itemWidth = with(density) { measuredWidthPx.toDp() }
         RokuLazyRowImpl(
             state = rowState,
+            itemCount = scope.itemCount,
             modifier = modifier,
             config = config,
             contentPadding = contentPadding,
@@ -185,6 +186,7 @@ fun RokuLazyRow(
 ) {
     RokuLazyRowImpl(
         state = state,
+        itemCount = state.itemCount,
         modifier = modifier,
         config = config,
         contentPadding = contentPadding,
@@ -247,6 +249,11 @@ fun RokuLazyRow(
  *   while rows scroll behind it ([RokuFocusMode.Static]), or walking the visible rows and
  *   scrolling only at the window's edges ([RokuFocusMode.Floating]). Each row's horizontal mode is
  *   its own `focusMode`; the two axes are independent.
+ * @param verticalAnchorOffset How far below [contentPadding]'s top the column parks the row it
+ *   scrolls to: the selected row in Static, the window's top row in Floating. The part of the row
+ *   above that shows in the gap. Rows the column cannot scroll back that far, such as the first,
+ *   sit where an unscrolled column has them, so a hero at the top of the feed stays flush with it.
+ *   Unlike a larger top padding, it never moves the first row down. Defaults to none.
  * @param content Row declarations via [RokuLazyColumnScope.row] and
  *   [RokuLazyColumnScope.customRow].
  */
@@ -263,6 +270,7 @@ fun RokuLazyColumn(
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
     verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
+    verticalAnchorOffset: Dp = 0.dp,
     content: RokuLazyColumnScope.() -> Unit
 ) {
     val scope = RokuLazyColumnScope().apply(content)
@@ -300,6 +308,8 @@ fun RokuLazyColumn(
                 RokuResolvedRow.Items(
                     key = spec.key,
                     header = spec.header,
+                    itemCount = spec.itemCount,
+                    itemContent = spec.itemContent,
                     config = RokuColumnRowConfig(
                         state = rowState,
                         itemWidth = itemWidth.takeOrElse { 0.dp },
@@ -343,16 +353,13 @@ fun RokuLazyColumn(
             contentPadding = contentPadding,
             rowSpacing = rowSpacing,
             verticalFocusMode = verticalFocusMode,
+            verticalAnchorOffset = verticalAnchorOffset,
             focusHighlight = focusHighlight,
             onItemSelected = onItemSelected,
             onItemClicked = onItemClicked,
             onFocusEnter = onFocusEnter,
             onFocusExit = onFocusExit,
-            rowHeader = null,
-            itemContent = { rowIndex, itemIndex, isFocused ->
-                val spec = scope.rows.getOrNull(rowIndex)
-                if (spec is RokuLazyColumnScope.RowSpec.Items) spec.itemContent(itemIndex, isFocused)
-            }
+            rowHeader = null
         )
     }
 }
@@ -454,6 +461,11 @@ private fun RokuColumnAutoMeasure(
  *   while rows scroll behind it ([RokuFocusMode.Static]), or walking the visible rows and
  *   scrolling only at the window's edges ([RokuFocusMode.Floating]). Each row's horizontal mode is
  *   its state's `focusMode`; the two axes are independent.
+ * @param verticalAnchorOffset How far below [contentPadding]'s top the column parks the row it
+ *   scrolls to: the selected row in Static, the window's top row in Floating. The part of the row
+ *   above that shows in the gap. Rows the column cannot scroll back that far, such as the first,
+ *   sit where an unscrolled column has them. Unlike a larger top padding, it never moves the
+ *   first row down. Defaults to none.
  * @param itemContent Composable for each item. Receives `(rowIndex, itemIndex, isFocused)`.
  */
 @Composable
@@ -471,10 +483,24 @@ fun RokuLazyColumn(
     onFocusExit: (() -> Unit)? = null,
     rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null,
     verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
+    verticalAnchorOffset: Dp = 0.dp,
     itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
 ) {
-    val resolvedRows = rows.map { rowConfig ->
-        RokuResolvedRow.Items(key = rowConfig.key, header = null, config = rowConfig)
+    // One wrapper per position, kept across passes: rebuilding them would hand every rail a new
+    // content lambda whenever any row's count changes, recomposing cards that did not.
+    val rowContents = remember(itemContent, rows.size) {
+        List<@Composable (Int, Boolean) -> Unit>(rows.size) { rowIndex ->
+            { itemIndex, isFocused -> itemContent(rowIndex, itemIndex, isFocused) }
+        }
+    }
+    val resolvedRows = rows.mapIndexed { rowIndex, rowConfig ->
+        RokuResolvedRow.Items(
+            key = rowConfig.key,
+            header = null,
+            config = rowConfig,
+            itemCount = rowConfig.state.itemCount,
+            itemContent = rowContents[rowIndex]
+        )
     }
 
     RokuLazyColumnImpl(
@@ -485,13 +511,13 @@ fun RokuLazyColumn(
         contentPadding = contentPadding,
         rowSpacing = rowSpacing,
         verticalFocusMode = verticalFocusMode,
+        verticalAnchorOffset = verticalAnchorOffset,
         focusHighlight = focusHighlight,
         onItemSelected = onItemSelected,
         onItemClicked = onItemClicked,
         onFocusEnter = onFocusEnter,
         onFocusExit = onFocusExit,
-        rowHeader = rowHeader,
-        itemContent = itemContent
+        rowHeader = rowHeader
     )
 }
 

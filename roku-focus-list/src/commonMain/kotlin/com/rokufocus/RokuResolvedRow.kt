@@ -48,6 +48,15 @@ internal sealed class RokuResolvedRow {
         override val key: Any?,
         override val header: (@Composable (isRowFocused: Boolean) -> Unit)?,
         val config: RokuColumnRowConfig,
+        /**
+         * The rail's count, [itemKey] and [itemContent] are captured together, from the one
+         * composition that declared them, and rendered only together. The state's count is read
+         * live for navigation, but a rail laid out from it pairs a count from one composition with
+         * lambdas from another; a content lambda resolved by row *position* at call time does the
+         * same. Either hands an item lambda an index its own list does not have.
+         */
+        val itemCount: Int,
+        val itemContent: @Composable (index: Int, isFocused: Boolean) -> Unit,
         val itemKey: ((index: Int) -> Any)? = null,
         /**
          * True while an auto-sized row's first item or header has not reported its size yet.

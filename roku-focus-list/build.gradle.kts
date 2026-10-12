@@ -118,8 +118,11 @@ mavenPublishing {
     pom {
         name.set("roku-focus-list")
         description.set(
-            "Roku-style fixed-focus D-pad navigation for Compose Multiplatform: the highlight " +
-                "stays at a fixed screen position while content scrolls behind it."
+            "Fixed-focus D-pad and remote navigation for TV apps in Jetpack Compose and Compose " +
+                "Multiplatform: Android TV, Google TV, Fire TV, Apple TV (tvOS), Samsung Tizen and " +
+                "desktop. Roku and Netflix-style rows, home screens and poster grids where the " +
+                "highlight stays put while content scrolls. A Leanback and androidx.tv focus " +
+                "alternative. Docs: https://github.com/souravnoobcoder/roku-focus-list"
         )
         inceptionYear.set("2024")
         url.set("https://github.com/souravnoobcoder/roku-focus-list")

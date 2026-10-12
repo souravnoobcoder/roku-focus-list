@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-10-12
+
+No code changes; the library is byte-for-byte the 2.5.0 sources.
+
+### Changed
+
+- **The published POM description names the platforms and the problem it solves** (Android TV, Google TV, Fire TV, Apple TV, Samsung Tizen; Leanback and `androidx.tv` focus alternative) and links the docs, so Maven Central search finds it.
+
+### Added
+
+- **README: Build errors and fixes.** Every Gradle error a consumer is likely to hit, reproduced against the published artifact and quoted verbatim: compileSdk 37 and AGP 9.1 from the AAR metadata check, the AGP 9 `org.jetbrains.kotlin.android` removal, the minSdk 23 manifest merge, Kotlin metadata 2.4.0 on an older compiler (2.3.0 is the verified minimum for a JVM consumer), the tvOS Compose resolution without the `compose-tvos` plugin, `iosX64`, and JitPack. Each has the cause, the fix and a prompt to paste into an AI coding assistant.
+- **README: FAQ** in the words people search with, and an `llms.txt` at the repository root summarising the library for AI assistants.
+- The install snippets now show the current version, and the Kotlin, Compose Multiplatform and API badges match the build.
+## [2.5.0] - 2026-09-28
+
+### Added
+
+- **`RokuLazyColumn(verticalAnchorOffset = …)`: park the row the column scrolls to below the top instead of flush with it.** Every vertical scroll put its target row's top exactly at `contentPadding.top` — the selected row in `Static`, the window's top row in `Floating` — so the only way to lower it was a larger top padding, which also pushes the first row (a hero, say) down and leaves a strip above it. The offset moves only the scroll target: the row lands that far below the top padding, with the bottom of the row above it showing in the gap, while rows the column cannot scroll back that far, the first among them, stay exactly where an unscrolled column has them. `Floating` containment accounts for the shorter window below the anchor, so the selected row is never parked below the viewport, and a row peeking into the band counts as above the window. Every scroll path honours it — the animated step, the far jump, the held-key snap and a restored column's first frame — and the highlight follows the rows through the end-of-list clamp. Both overloads, default `0.dp`, which behaves exactly as before. Closes the "vertical `focusSlot` is hardcoded to 0" known issue.
+- `RokuVerticalAnchorMathTest` (the scroll target, containment, the lazy-list position a snap or restore lands on, zero-offset parity) and `RokuVerticalAnchorOffsetTest` (where rows and the highlight really land, per scroll path, in both modes, with a hero, at the end of the column and on a restored first frame).
+- `RokuItemCountConsistencyTest`: rails that grow, shrink, fill from empty and shift under an inserted row, on the column (both overloads), both `RokuLazyRow` overloads and the grid, with item lambdas that index an immutable list so a mismatch throws.
+
+### Fixed
+
+- **A rail whose data changes no longer asks its item lambdas for an index their list does not have.** Every rail laid its items out from the row state's `itemCount`, which is snapshot state written during composition, while its `key` and item lambdas were the ones captured by the rail's last composition. The moment a new count landed, the LazyRow re-derived its items against the previous composition's lambdas, so a keyed rail that grew from one item to two called the old key lambda with index 1 and threw `IndexOutOfBoundsException: Index 1, Size 1`. It hit `RokuLazyColumn`'s `row { }` DSL, both `RokuLazyRow` overloads and `RokuFocusGrid`. The column's DSL had a second form of the same mismatch: it resolved a row's item lambda by *position* at call time, through a lambda Compose updates in place, so anything still composing against an older layout, such as a prefetched row resumed after the data changed, could be handed the newest list, which is how the same exception can surface from the item content lambda instead. Each rail now lays out the count captured with its key and item lambdas in one composition, and a column row carries its own item lambda instead of looking it up by position. `itemCount` on the states is unchanged and still drives navigation.
+
+## [2.4.0] - 2026-09-25
+
+### Changed
+
+- **The column's highlight changes size on `verticalAnimationSpec`, together with its Y.** Width and height ran on a fixed 100 ms tween while the position travelled on the vertical spec, so between two rows of different card shapes the box had finished changing shape a third of the way into its travel. A consumer drawing its ring to the box saw it pop to the destination's shape at the top of the move and then slide down — the glitch every feed with mixed rails showed on vertical moves and never on horizontal ones, which keep the shape. Size only ever changes with the row, so it now rides the same curve as the travel and the two finish together. Consumers with a single card shape see no difference.
+
+### Added
+
+- `RokuFocusConfig.rowPrefetchItemCount` (default `2`, Compose's own): how many items of the row a `RokuLazyColumn` is scrolling toward it composes ahead of the scroll, in idle frame time, through the lazy list's nested prefetch. Every card past that count composes in the frame the row enters the viewport — on a TV rail of six or seven visible cards that was one 30–50 ms frame per row on a mid-range Android TV, the hitch a fast run down a feed shows. Set it to the widest rail's visible count. Rows and grids are unaffected.
+
 ## [2.3.2] - 2026-09-17
 
 ### Fixed
@@ -175,7 +210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Callbacks: `onItemSelected`, `onItemClicked`, `onFocusEnter`, `onFocusExit`.
 - Demo app with 10 rows, 6 card types, 308 items.
 
-[Unreleased]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.3.0...HEAD
+[Unreleased]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.5.1...HEAD
+[2.5.1]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.5.0...2.5.1
 [2.3.0]: https://github.com/souravnoobcoder/roku-focus-list/compare/2.2.0...2.3.0
 [2.0.0]: https://github.com/souravnoobcoder/roku-focus-list/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/souravnoobcoder/roku-focus-list/releases/tag/v1.0.0

@@ -28,12 +28,20 @@ val DefaultRokuFocusConfig = RokuFocusConfig()
  *   floating row: the card under the highlight ([RokuRowEntry.Spatial], the default) or the one
  *   the row last had ([RokuRowEntry.Remembered]).
  * @property verticalAnimationSpec Speed of a vertical move in [RokuLazyColumn] and
- *   [RokuFocusGrid]: drives both the highlight's Y and the content scroll between rows, so the
- *   two travel together. Null keeps [highlightAnimationSpec] for the highlight and the library's
- *   default spring for the scroll. Horizontal moves are unaffected.
+ *   [RokuFocusGrid]: drives the highlight's Y, the content scroll between rows and — in the
+ *   column — the highlight's width and height, so a move between rows of different card shapes
+ *   changes the box's shape on the curve it changes its position on. Null keeps
+ *   [highlightAnimationSpec] for the highlight and the library's default spring for the scroll.
+ *   Horizontal moves are unaffected.
  * @property verticalKeyRepeatDelayMs Minimum gap between two accepted UP/DOWN presses while the
  *   key is held, before acceleration. Null uses [keyRepeatDelayMs]. Raise it to slow a held
  *   D-pad down the column without slowing it along a row.
+ * @property rowPrefetchItemCount How many items of the row a [RokuLazyColumn] is scrolling
+ *   toward it composes ahead of time, in the idle slice of the frames before that row enters
+ *   the viewport (Compose's `nestedPrefetchItemCount`). The default is Compose's own, 2, sized
+ *   for a phone list; every card past it composes in the frame the row scrolls in, which on a
+ *   TV rail of six or seven visible cards is one long frame per row. Set it to the widest rail's
+ *   visible count. Rows and grids are unaffected.
  *
  * The parameters after `focusEscape` are appended in the order they were added so positional
  * 2.x calls keep their meaning.
@@ -48,7 +56,8 @@ data class RokuFocusConfig(
     val focusEscape: RokuFocusEscape = RokuFocusEscape.All,
     val rowEntry: RokuRowEntry = RokuRowEntry.Spatial,
     val verticalAnimationSpec: AnimationSpec<Float>? = null,
-    val verticalKeyRepeatDelayMs: Long? = null
+    val verticalKeyRepeatDelayMs: Long? = null,
+    val rowPrefetchItemCount: Int = 2
 )
 
 /**

@@ -1,9 +1,8 @@
 package com.rokufocus
 
 import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.lazy.LazyListPrefetchStrategy
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,9 +47,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** Cached per-frame size animation spec — avoids allocation on every recomposition. */
-private val HighlightSizeSpec: AnimationSpec<Float> = tween(durationMillis = 100, easing = FastOutSlowInEasing)
-
 /** Plain holder, not snapshot state: nothing observes which row the column last marked focused. */
 private class FocusedRowRef {
     var value: RokuFocusListState? = null
@@ -71,9 +69,11 @@ private class ColumnGeometry(
     val maxVerticalScrollPx: Float,
     val topPaddingPx: Float,
     val viewportHeightPx: Float,
-    val rowSpacingPx: Float
+    val rowSpacingPx: Float,
+    val anchorOffsetPx: Float
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun RokuLazyColumnImpl(
     rows: List<RokuResolvedRow>,
@@ -83,13 +83,13 @@ internal fun RokuLazyColumnImpl(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     rowSpacing: Dp = 24.dp,
     verticalFocusMode: RokuFocusMode = RokuFocusMode.Static,
+    verticalAnchorOffset: Dp = 0.dp,
     focusHighlight: @Composable RokuHighlightScope.(isFocused: Boolean) -> Unit = { DefaultFocusHighlight(it) },
     onItemSelected: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
     onItemClicked: ((rowIndex: Int, itemIndex: Int) -> Unit)? = null,
     onFocusEnter: (() -> Unit)? = null,
     onFocusExit: (() -> Unit)? = null,
-    rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null,
-    itemContent: @Composable (rowIndex: Int, itemIndex: Int, isFocused: Boolean) -> Unit
+    rowHeader: (@Composable (rowIndex: Int, isRowFocused: Boolean) -> Unit)? = null
 ) {
     // Published before anything reads selectedRowIndex, so the row it resolves to is always one
     // that exists and has something to select.
@@ -108,16 +108,32 @@ internal fun RokuLazyColumnImpl(
     val touchpad = LocalRokuTouchpad.current
     // Laid out at the row the state already points to — see RokuRowContent — so a restored column
     // shows its remembered rows from the first frame. Floating anchors the window, Static scrolls
-    // the selected row itself; both are the row the scroll effect below resolves.
-    val initialColumnRow = remember {
+    // the selected row itself; both are the row the scroll effect below resolves. The anchor
+    // offset is applied here too: the first frame is measured before the landing scroll runs, so
+    // starting at the bare row would show it at the top edge for a frame and then drop it.
+    val initialColumnPosition = remember {
         Snapshot.withoutReadObservation {
-            when (verticalFocusMode) {
+            val row = when (verticalFocusMode) {
                 RokuFocusMode.Floating -> state.windowAnchorRow
                 RokuFocusMode.Static -> state.selectedRowIndex
             }.coerceIn(0, rows.lastIndex)
+            val spacingPx = with(density) { rowSpacing.toPx() }
+            anchoredScrollPosition(
+                row = row,
+                anchorOffsetPx = with(density) { verticalAnchorOffset.toPx() }
+            ) { i -> with(density) { rows[i].laidOutHeight.toPx() } + spacingPx }
         }
     }
-    val lazyColumnState = rememberLazyListState(initialFirstVisibleItemIndex = initialColumnRow)
+    // Remembered: `rememberLazyListState` keys its saveable on the strategy instance, so a fresh
+    // one per pass would rebuild the list state — and lose the scroll — on every recomposition.
+    val prefetchStrategy = remember(config.rowPrefetchItemCount) {
+        LazyListPrefetchStrategy(nestedPrefetchItemCount = config.rowPrefetchItemCount)
+    }
+    val lazyColumnState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialColumnPosition.index,
+        initialFirstVisibleItemScrollOffset = initialColumnPosition.offset,
+        prefetchStrategy = prefetchStrategy
+    )
 
     val selectedRowIndex = state.selectedRowIndex
     val activeRow = rows[selectedRowIndex]
@@ -211,7 +227,9 @@ internal fun RokuLazyColumnImpl(
         // with nothing in it renders nothing, so it must contribute nothing to the geometry
         // either, or every row below it lands at the wrong Y). A selection move reads the cached
         // arrays and allocates nothing.
-        val geometryState = remember(rows, density, layoutDirection, contentPadding, rowSpacing, maxHeight) {
+        val geometryState = remember(
+            rows, density, layoutDirection, contentPadding, rowSpacing, maxHeight, verticalAnchorOffset
+        ) {
             derivedStateOf {
                 val topPx = with(density) { contentPadding.calculateTopPadding().toPx() }
                 val bottomPx = with(density) { contentPadding.calculateBottomPadding().toPx() }
@@ -268,7 +286,8 @@ internal fun RokuLazyColumnImpl(
                     maxVerticalScrollPx = (totalContent - viewportHeightPx).coerceAtLeast(0f),
                     topPaddingPx = topPx,
                     viewportHeightPx = viewportHeightPx,
-                    rowSpacingPx = spacingPx
+                    rowSpacingPx = spacingPx,
+                    anchorOffsetPx = with(density) { verticalAnchorOffset.toPx() }.coerceAtLeast(0f)
                 )
             }
         }
@@ -300,7 +319,8 @@ internal fun RokuLazyColumnImpl(
                 rowCumOffsetPx = geometry.rowCumOffsetPx,
                 rowHeightsPx = geometry.rowHeightsPx,
                 viewportHeightPx = geometry.viewportHeightPx,
-                topPaddingPx = geometry.topPaddingPx
+                topPaddingPx = geometry.topPaddingPx,
+                anchorOffsetPx = geometry.anchorOffsetPx
             )
             if (contained != anchor) state.windowAnchorRow = contained
             contained
@@ -308,12 +328,17 @@ internal fun RokuLazyColumnImpl(
             selectedRowIndex
         }
 
-        val desiredVerticalScrollPx = geometry.rowCumOffsetPx.getOrElse(scrollTargetRow) { 0f }
+        // The target row parks `anchorOffsetPx` below the top padding, which is the same as
+        // scrolling that much less. Clamped at zero, so the rows the offset cannot lift clear of
+        // the top — the first of them, a hero — stay exactly where an unscrolled column has them.
+        val desiredVerticalScrollPx = anchoredScrollPx(
+            geometry.rowCumOffsetPx.getOrElse(scrollTargetRow) { 0f }, geometry.anchorOffsetPx
+        )
         val verticalScrollOverflowPx =
             (desiredVerticalScrollPx - geometry.maxVerticalScrollPx).coerceAtLeast(0f)
 
-        // How far below the window row the selected row sits. Zero in Static, where the scroll
-        // target is the selected row itself.
+        // How far below the window's top the selected row sits: the anchor offset in Static (or
+        // less, near the top), plus the rows the highlight has walked in Floating.
         val windowOffsetPx =
             geometry.rowCumOffsetPx.getOrElse(selectedRowIndex) { 0f } - desiredVerticalScrollPx
 
@@ -329,29 +354,33 @@ internal fun RokuLazyColumnImpl(
         // still degenerate.
         val landing = remember(lazyColumnState) { ColumnLanding() }
         LaunchedEffect(scrollTargetRow, geometry) {
+            val cumOffsets = geometry.rowCumOffsetPx
             if (!landing.done) {
                 if (geometry.viewportHeightPx > 0f) landing.done = true
                 scrollAnimator.reset()
-                lazyColumnState.scrollToItem(scrollTargetRow)
+                lazyColumnState.scrollToOffset(scrollTargetRow, desiredVerticalScrollPx, cumOffsets)
                 return@LaunchedEffect
             }
             if (state.keyRepeat.consecutivePresses > config.keyRepeatAccelAfter) {
                 scrollAnimator.reset()
-                lazyColumnState.scrollToItem(scrollTargetRow)
+                lazyColumnState.scrollToOffset(scrollTargetRow, desiredVerticalScrollPx, cumOffsets)
             } else {
-                val cumOffsets = geometry.rowCumOffsetPx
                 val currentPx = cumOffsets.getOrElse(lazyColumnState.firstVisibleItemIndex) { 0f } +
                     lazyColumnState.firstVisibleItemScrollOffset
                 val targetPx = lazyColumnState.targetOffsetPx(
                     index = scrollTargetRow,
                     currentPx = currentPx,
                     estimatedPx = cumOffsets.getOrElse(scrollTargetRow) { 0f },
-                    maxScrollPx = geometry.maxVerticalScrollPx
+                    maxScrollPx = geometry.maxVerticalScrollPx,
+                    leadingPx = geometry.anchorOffsetPx
                 )
-                scrollAnimator.scrollToIndex(
-                    lazyColumnState, scrollTargetRow, currentPx, targetPx, geometry.viewportHeightPx,
+                scrollAnimator.animateTo(
+                    lazyColumnState, currentPx, targetPx, geometry.viewportHeightPx,
                     spec = config.verticalAnimationSpec ?: DefaultScrollSpec
-                )
+                ) {
+                    val row = rowAtOrBefore(scrollTargetRow, targetPx, cumOffsets)
+                    lazyColumnState.animateScrollToItem(row, offsetInto(row, targetPx, cumOffsets))
+                }
             }
         }
 
@@ -376,7 +405,15 @@ internal fun RokuLazyColumnImpl(
             viewportWidthPx
         }
 
-        // ── Animate highlight: full spec for position, fast tween for size ──
+        // ── Animate highlight: position and size on one curve ──
+        //
+        // The width and height ran on their own 100ms tween while Y travelled on `verticalSpec`
+        // (a ~150ms spring for most consumers), so between two rows of different card shapes the
+        // box had finished changing shape while it was still a third of the way down. A consumer
+        // drawing its ring to the box saw the ring pop to the destination's shape at the top of
+        // the travel and then slide — the glitch every feed with mixed rails showed on vertical
+        // moves and never on horizontal ones. Size changes only ever come from a row change, so
+        // the vertical spec is the right clock for it and the two now finish together.
         //
         // 🚨 Keyed on whether the highlight is drawn at all. A row that hides it — a hero drawing
         // its own treatment, through `showHighlight = false` — still moves these targets, so while
@@ -393,9 +430,9 @@ internal fun RokuLazyColumnImpl(
             HighlightFrame(
                 x = animateFloatAsState(targetHighlightX, spec, label = "hl_x"),
                 y = animateFloatAsState(targetHighlightY, verticalSpec, label = "hl_y"),
-                width = animateFloatAsState(targetHighlightWidth, HighlightSizeSpec, label = "hl_w"),
+                width = animateFloatAsState(targetHighlightWidth, verticalSpec, label = "hl_w"),
                 height = animateFloatAsState(
-                    geometry.contentHeightPx[selectedRowIndex], HighlightSizeSpec, label = "hl_h"
+                    geometry.contentHeightPx[selectedRowIndex], verticalSpec, label = "hl_h"
                 ),
             )
         }
@@ -422,7 +459,7 @@ internal fun RokuLazyColumnImpl(
         // back inside each item's own scope via derivedStateOf, so a move recomposes exactly the
         // rows and items whose focus actually flipped.
         val rowItemContent: (@Composable LazyItemScope.(Int) -> Unit) =
-            remember(rows, state, rowHeader, itemContent, focusedItemModifier) {
+            remember(rows, state, rowHeader, focusedItemModifier) {
                 { rowIndex ->
                     val row = rows[rowIndex]
                     // Keyed on rowIndex: a keyed row that shifts position keeps its composition,
@@ -444,6 +481,7 @@ internal fun RokuLazyColumnImpl(
                         when (row) {
                             is RokuResolvedRow.Items -> RokuRowContent(
                                 state = row.config.state,
+                                itemCount = row.itemCount,
                                 contentPadding = row.config.contentPadding,
                                 itemWidth = row.config.itemWidth,
                                 itemSpacing = row.config.itemSpacing,
@@ -452,9 +490,7 @@ internal fun RokuLazyColumnImpl(
                                 itemContentDescription = row.config.itemContentDescription,
                                 rowFocused = { state.hasFocus && rowIndex == state.selectedRowIndex },
                                 focusedItemModifier = focusedItemModifier,
-                                itemContent = { itemIndex, isFocused ->
-                                    itemContent(rowIndex, itemIndex, isFocused)
-                                }
+                                itemContent = row.itemContent
                             )
 
                             is RokuResolvedRow.Custom -> Box(
@@ -647,6 +683,11 @@ private class SpatialRowEntry(
  * minimally from [anchorRow]. The window is pixel-based, not row-based: rows have heterogeneous
  * heights and an empty row contributes zero, so "visible" means the selected row's
  * `[top, top + height]` span fits between the window row's top and the viewport bottom.
+ *
+ * With an [anchorOffsetPx] the window row sits that far below the top padding (or less, where the
+ * column cannot scroll back far enough), so the span it can hold below it is shorter by the same
+ * amount. A row above the window row is outside the window even while part of it shows in the
+ * offset band: selecting it scrolls it down onto the anchor.
  */
 internal fun containVerticalWindow(
     anchorRow: Int,
@@ -654,7 +695,8 @@ internal fun containVerticalWindow(
     rowCumOffsetPx: FloatArray,
     rowHeightsPx: FloatArray,
     viewportHeightPx: Float,
-    topPaddingPx: Float
+    topPaddingPx: Float,
+    anchorOffsetPx: Float = 0f
 ): Int {
     if (rowCumOffsetPx.isEmpty()) return 0
     val anchor = anchorRow.coerceIn(0, rowCumOffsetPx.lastIndex)
@@ -662,17 +704,83 @@ internal fun containVerticalWindow(
     val selectedTop = rowCumOffsetPx[selected]
     val selectedBottom = selectedTop + rowHeightsPx[selected]
     val windowHeightPx = viewportHeightPx - topPaddingPx
+    val requiredScrollPx = selectedBottom - windowHeightPx
     return when {
         selectedTop < rowCumOffsetPx[anchor] -> selected
-        selectedBottom > rowCumOffsetPx[anchor] + windowHeightPx -> {
+        anchoredScrollPx(rowCumOffsetPx[anchor], anchorOffsetPx) < requiredScrollPx -> {
             // Smallest forward shift that fits the selected row's bottom edge. A row taller than
-            // the window degenerates to the selected row itself, top-aligned like Static.
+            // the window degenerates to the selected row itself, parked on the anchor like Static.
             var row = anchor
-            while (row < selected && rowCumOffsetPx[row] < selectedBottom - windowHeightPx) row++
+            while (row < selected &&
+                anchoredScrollPx(rowCumOffsetPx[row], anchorOffsetPx) < requiredScrollPx
+            ) row++
             row
         }
 
         else -> anchor
     }
+}
+
+/** The scroll that parks a row whose top is [rowTopPx] [anchorOffsetPx] below the top padding. */
+internal fun anchoredScrollPx(rowTopPx: Float, anchorOffsetPx: Float): Float =
+    (rowTopPx - anchorOffsetPx).coerceAtLeast(0f)
+
+/** The height the column's geometry gives a row: nothing for one it currently skips. */
+internal val RokuResolvedRow.laidOutHeight: Dp
+    get() = when (this) {
+        is RokuResolvedRow.Items -> if (isSelectable) headerHeight + contentHeight else 0.dp
+        is RokuResolvedRow.Custom -> headerHeight + contentHeight
+    }
+
+/** A lazy list position: an item and how far into it the viewport starts. */
+internal class ColumnScrollPosition(val index: Int, val offset: Int)
+
+/**
+ * The lazy list position that parks [row] [anchorOffsetPx] below the top padding, walking back
+ * through the rows above it. [pitchPx] is a row's height plus the row spacing. A column too short
+ * above [row] to give the whole offset starts at its top instead, as the scroll target does.
+ */
+internal fun anchoredScrollPosition(
+    row: Int,
+    anchorOffsetPx: Float,
+    pitchPx: (row: Int) -> Float
+): ColumnScrollPosition {
+    var remaining = anchorOffsetPx
+    var current = row
+    while (remaining > 0f && current > 0) {
+        val pitch = pitchPx(current - 1)
+        if (pitch > remaining) return ColumnScrollPosition(current - 1, (pitch - remaining).roundToInt())
+        remaining -= pitch
+        current--
+    }
+    return ColumnScrollPosition(current, 0)
+}
+
+/**
+ * The row whose top is at or above [absolutePx], searched back from [fromRow] — the scroll target,
+ * which [absolutePx] is at most an anchor offset above. The half-pixel tolerance keeps a measured
+ * offset that lands a hair above the target's own top from resolving to the row before it.
+ */
+internal fun rowAtOrBefore(fromRow: Int, absolutePx: Float, rowCumOffsetPx: FloatArray): Int {
+    if (rowCumOffsetPx.isEmpty()) return 0
+    var row = fromRow.coerceIn(0, rowCumOffsetPx.lastIndex)
+    while (row > 0 && rowCumOffsetPx[row] > absolutePx + HalfPixel) row--
+    return row
+}
+
+/** How far into [row] the viewport starts when the column is scrolled to [absolutePx]. */
+internal fun offsetInto(row: Int, absolutePx: Float, rowCumOffsetPx: FloatArray): Int =
+    (absolutePx - rowCumOffsetPx.getOrElse(row) { 0f }).roundToInt().coerceAtLeast(0)
+
+private const val HalfPixel = 0.5f
+
+/** Snaps the column to an absolute offset, expressed as the row it falls in and the rest. */
+private suspend fun LazyListState.scrollToOffset(
+    targetRow: Int,
+    absolutePx: Float,
+    rowCumOffsetPx: FloatArray
+) {
+    val row = rowAtOrBefore(targetRow, absolutePx, rowCumOffsetPx)
+    scrollToItem(row, offsetInto(row, absolutePx, rowCumOffsetPx))
 }
 
